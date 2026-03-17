@@ -3,8 +3,8 @@ testdata_dir = "testdata"
 tmp_dir = "tmp"
 
 [build]
-entrypoint = "./cmd/main.go"
-cmd = "go build -o ./tmp/codexsess ./cmd"
+entrypoint = "./main.go"
+cmd = "go build -o ./tmp/codexsess ."
 full_bin = "PORT=3052 CODEXSESS_NO_OPEN_BROWSER=1 ./tmp/codexsess"
 include_ext = ["go"]
 exclude_dir = ["tmp", "web", "node_modules"]

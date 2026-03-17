@@ -20,7 +20,7 @@ build-frontend:
 
 build-backend:
 	@echo "Building backend binary $(BINARY_PATH)..."
-	go build -o $(BINARY_PATH) ./cmd
+	go build -o $(BINARY_PATH) .
 
 run: build
 	@echo "Starting $(BINARY_NAME) on port $(RUN_PORT)..."
