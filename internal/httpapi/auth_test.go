@@ -10,7 +10,11 @@ func TestResolveAccountHeader(t *testing.T) {
 	if v != "acc_123" {
 		t.Fatalf("got %q", v)
 	}
-	if _, err := ResolveAccountHeader("  "); err == nil {
-		t.Fatal("expected error for empty header")
+	empty, err := ResolveAccountHeader("  ")
+	if err != nil {
+		t.Fatalf("unexpected err for empty header: %v", err)
+	}
+	if empty != "" {
+		t.Fatalf("expected empty selector, got %q", empty)
 	}
 }

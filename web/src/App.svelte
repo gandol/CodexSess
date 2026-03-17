@@ -8,10 +8,20 @@
   let claudeEndpoint = $state('');
   let activeMenu = $state('dashboard');
   let apiLogs = $state([]);
+  let showLogDetailModal = $state(false);
+  let logDetailEntry = $state(null);
   let availableModels = $state([]);
   let modelMappings = $state({});
   let mappingAlias = $state('');
   let mappingTargetModel = $state('gpt-5.2-codex');
+  const defaultCodexModels = [
+    'gpt-5.1-codex-max',
+    'gpt-5.2',
+    'gpt-5.2-codex',
+    'gpt-5.3-codex',
+    'gpt-5.4-mini',
+    'gpt-5.4'
+  ];
 
   let showAddAccountModal = $state(false);
   let addAccountMode = $state('menu');
@@ -256,6 +266,89 @@
   }'`;
   }
 
+  function prettyJSONText(raw) {
+    const text = String(raw ?? '').trim();
+    if (!text) return '';
+    try {
+      return JSON.stringify(JSON.parse(text), null, 2);
+    } catch {
+      return text;
+    }
+  }
+
+  function parseAPILogLine(line, index) {
+    const rawLine = String(line ?? '');
+    const fallback = {
+      id: `raw-${index}`,
+      rawLine,
+      timestamp: null,
+      protocol: 'unknown',
+      method: '-',
+      path: '(raw log line)',
+      status: 0,
+      latencyMS: 0,
+      model: '',
+      requestBody: '',
+      responseBody: '',
+      invalid: true
+    };
+    if (!rawLine.trim()) return fallback;
+    try {
+      const obj = JSON.parse(rawLine);
+      const timestamp = typeof obj.timestamp === 'string' ? obj.timestamp : null;
+      const protocol = String(obj.protocol || 'unknown').toLowerCase();
+      const method = String(obj.method || '-').toUpperCase();
+      const path = String(obj.path || '/');
+      const status = Number(obj.status) || 0;
+      const latencyMS = Number(obj.latency_ms) || 0;
+      const model = String(obj.model || '').trim();
+      const requestBody = prettyJSONText(obj.request_body);
+      const responseBody = prettyJSONText(obj.response_body);
+      return {
+        id: `${timestamp || 'ts'}-${index}-${path}-${status}`,
+        rawLine,
+        timestamp,
+        protocol,
+        method,
+        path,
+        status,
+        latencyMS,
+        model,
+        requestBody,
+        responseBody,
+        invalid: false
+      };
+    } catch {
+      return fallback;
+    }
+  }
+
+  function formatLogTimestamp(ts) {
+    if (!ts) return '-';
+    const d = new Date(ts);
+    if (Number.isNaN(d.getTime())) return '-';
+    return d.toLocaleString();
+  }
+
+  function logStatusClass(status) {
+    const n = Number(status) || 0;
+    if (n >= 500) return 'status-5xx';
+    if (n >= 400) return 'status-4xx';
+    if (n >= 300) return 'status-3xx';
+    if (n >= 200) return 'status-2xx';
+    return 'status-unknown';
+  }
+
+  function openLogDetail(entry) {
+    logDetailEntry = entry;
+    showLogDetailModal = true;
+  }
+
+  function closeLogDetailModal() {
+    showLogDetailModal = false;
+    logDetailEntry = null;
+  }
+
   async function req(url, options = {}) {
     const response = await fetch(url, {
       headers: jsonHeaders,
@@ -284,41 +377,18 @@
     apiKey = data.api_key || '';
     openAIEndpoint = data.openai_endpoint || '';
     claudeEndpoint = data.claude_endpoint || '';
-    availableModels = Array.isArray(data.available_models) ? data.available_models : availableModels;
+    const fromAPI = Array.isArray(data.available_models) ? data.available_models : [];
+    availableModels = fromAPI.length > 0 ? fromAPI : defaultCodexModels;
     modelMappings = (data.model_mappings && typeof data.model_mappings === 'object') ? data.model_mappings : {};
     if (!availableModels.includes(mappingTargetModel) && availableModels.length > 0) {
       mappingTargetModel = availableModels[0];
     }
   }
 
-  async function loadAvailableModels() {
-    if (!apiKey) {
-      availableModels = [];
-      return;
-    }
-    const response = await fetch('/v1/models', {
-      method: 'GET',
-      headers: { Authorization: `Bearer ${apiKey}` }
-    });
-    const bodyText = await response.text();
-    let body = {};
-    try {
-      body = JSON.parse(bodyText || '{}');
-    } catch {
-      body = {};
-    }
-    if (!response.ok) {
-      throw new Error(body?.error?.message || body?.message || bodyText || `HTTP ${response.status}`);
-    }
-    const data = Array.isArray(body?.data) ? body.data : [];
-    availableModels = data
-      .map((m) => String(m?.id || '').trim())
-      .filter((v) => v.length > 0);
-  }
-
   async function loadAPILogs() {
     const data = await req('/api/logs?limit=400');
-    apiLogs = data.lines || [];
+    const lines = Array.isArray(data.lines) ? data.lines : [];
+    apiLogs = lines.map((line, idx) => parseAPILogLine(line, idx));
   }
 
   async function refreshAllData() {
@@ -698,11 +768,6 @@
   });
 
   $effect(() => {
-    if (!apiKey) return;
-    loadAvailableModels().catch((error) => setStatus(error.message, 'error'));
-  });
-
-  $effect(() => {
     const timer = setInterval(() => {
       nowTick = Date.now();
     }, 30000);
@@ -1053,12 +1118,67 @@
         {#if apiLogs.length === 0}
           <p class="muted">No traffic logs yet.</p>
         {:else}
-          {#each apiLogs as line, i (`${i}-${line.slice(0,16)}`)}
-            <pre>{line}</pre>
+          {#each apiLogs as entry (entry.id)}
+            <article class="log-row">
+              <div class="log-main">
+                <div class="log-topline">
+                  <code class="log-path">{entry.path}</code>
+                  <span class="log-method">{entry.method}</span>
+                  <span class="log-proto">{entry.protocol}</span>
+                </div>
+                <p class="log-subline">
+                  <span>{formatLogTimestamp(entry.timestamp)}</span>
+                  <span>{entry.latencyMS} ms</span>
+                  {#if entry.model}
+                    <span>{entry.model}</span>
+                  {/if}
+                </p>
+              </div>
+              <div class="log-actions">
+                <span class="log-status {logStatusClass(entry.status)}">{entry.status || '-'}</span>
+                <button class="btn btn-secondary btn-mini" onclick={() => openLogDetail(entry)}>Detail</button>
+              </div>
+            </article>
           {/each}
         {/if}
       </div>
     </section>
+  {/if}
+
+  {#if showLogDetailModal && logDetailEntry}
+    <div
+      class="modal-backdrop"
+      role="button"
+      tabindex="0"
+      onclick={(e) => e.target === e.currentTarget && closeLogDetailModal()}
+      onkeydown={(e) => (e.key === 'Escape' || e.key === 'Enter') && closeLogDetailModal()}
+    >
+      <div class="modal-card log-detail-card" role="dialog" aria-modal="true" tabindex="0">
+        <div class="modal-head">
+          <div>
+            <h3>API Log Detail</h3>
+            <p class="modal-subtitle">
+              <span class="mono">{logDetailEntry.method}</span>
+              <span> </span>
+              <span class="mono">{logDetailEntry.path}</span>
+              <span> · </span>
+              <span class="mono">{logDetailEntry.status || '-'}</span>
+            </p>
+          </div>
+          <button class="btn btn-secondary btn-mini" onclick={closeLogDetailModal}>Close</button>
+        </div>
+        <div class="log-detail-grid">
+          <div class="log-payload">
+            <p class="field-label">Request Body</p>
+            <pre>{logDetailEntry.requestBody || '-'}</pre>
+          </div>
+          <div class="log-payload">
+            <p class="field-label">Response Body</p>
+            <pre>{logDetailEntry.responseBody || '-'}</pre>
+          </div>
+        </div>
+      </div>
+    </div>
   {/if}
 
 </main>
@@ -1466,10 +1586,130 @@
     max-height: 58vh;
     overflow: auto;
     display: grid;
-    gap: .4rem;
+    gap: .55rem;
   }
 
-  .logs-box pre {
+  .log-row {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: .75rem;
+    align-items: center;
+    border: 1px solid rgba(148,163,184,.24);
+    border-radius: .72rem;
+    background: rgba(15,23,42,.62);
+    padding: .62rem .68rem;
+  }
+
+  .log-main {
+    min-width: 0;
+    display: grid;
+    gap: .32rem;
+  }
+
+  .log-topline {
+    display: flex;
+    gap: .45rem;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+
+  .log-path {
+    font-size: .78rem;
+    color: #dbeafe;
+    background: rgba(30,58,138,.2);
+    border: 1px solid rgba(59,130,246,.35);
+    border-radius: .45rem;
+    padding: .14rem .4rem;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .log-method,
+  .log-proto {
+    font-size: .68rem;
+    font-weight: 700;
+    letter-spacing: .05em;
+    text-transform: uppercase;
+    color: #cbd5e1;
+    border: 1px solid rgba(148,163,184,.35);
+    border-radius: 999px;
+    padding: .14rem .45rem;
+  }
+
+  .log-subline {
+    margin: 0;
+    color: var(--muted);
+    font-size: .72rem;
+    display: flex;
+    gap: .58rem;
+    flex-wrap: wrap;
+  }
+
+  .log-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: .45rem;
+  }
+
+  .log-status {
+    min-width: 56px;
+    text-align: center;
+    border-radius: 999px;
+    font-size: .72rem;
+    font-weight: 700;
+    letter-spacing: .03em;
+    padding: .2rem .48rem;
+    border: 1px solid rgba(148,163,184,.35);
+    color: #e2e8f0;
+    background: rgba(30,41,59,.65);
+  }
+
+  .log-status.status-2xx {
+    border-color: rgba(34,197,94,.45);
+    color: #bbf7d0;
+    background: rgba(22,101,52,.24);
+  }
+
+  .log-status.status-3xx {
+    border-color: rgba(56,189,248,.45);
+    color: #bae6fd;
+    background: rgba(12,74,110,.24);
+  }
+
+  .log-status.status-4xx {
+    border-color: rgba(251,191,36,.5);
+    color: #fde68a;
+    background: rgba(120,53,15,.26);
+  }
+
+  .log-status.status-5xx {
+    border-color: rgba(248,113,113,.52);
+    color: #fecaca;
+    background: rgba(127,29,29,.28);
+  }
+
+  .log-detail-card {
+    width: min(980px, 100%);
+  }
+
+  .log-detail-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: .7rem;
+  }
+
+  .log-payload {
+    border: 1px solid rgba(148,163,184,.22);
+    border-radius: .72rem;
+    background: rgba(2,6,23,.5);
+    padding: .62rem;
+    display: grid;
+    gap: .42rem;
+  }
+
+  .log-payload pre {
     margin: 0;
     white-space: pre-wrap;
     word-break: break-word;
@@ -1477,6 +1717,8 @@
     line-height: 1.45;
     color: #dbeafe;
     font-family: 'Fira Code', monospace;
+    max-height: 44vh;
+    overflow: auto;
   }
 
   .status-banner {
@@ -1725,6 +1967,9 @@
     .icon-btn { width: 100%; min-width: 0; }
     .menu-nav { width: 100%; justify-content: flex-start; }
     .setting-value-row { grid-template-columns: 1fr; }
+    .log-row { grid-template-columns: 1fr; }
+    .log-actions { justify-content: space-between; }
+    .log-detail-grid { grid-template-columns: 1fr; }
   }
 
   @media (prefers-reduced-motion: reduce) {

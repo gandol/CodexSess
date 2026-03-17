@@ -57,6 +57,7 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 		respondJSON(w, 200, map[string]any{"ok": true})
 	})
 	mux.HandleFunc("/v1/models", s.withTrafficLog("openai", s.handleModels))
+	mux.HandleFunc("/v1", s.withTrafficLog("openai", s.handleOpenAIV1Root))
 	mux.HandleFunc("/v1/chat/completions", s.withTrafficLog("openai", s.handleChatCompletions))
 	mux.HandleFunc("/v1/responses", s.withTrafficLog("openai", s.handleResponses))
 	mux.HandleFunc("/claude/v1/messages", s.withTrafficLog("claude", s.handleClaudeMessages))
@@ -229,6 +230,41 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, 200, resp)
 }
 
+func (s *Server) handleOpenAIV1Root(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		s.handleModels(w, r)
+		return
+	case http.MethodPost:
+		var body []byte
+		if r.Body != nil {
+			body, _ = io.ReadAll(io.LimitReader(r.Body, 1<<20))
+			_ = r.Body.Close()
+			r.Body = io.NopCloser(bytes.NewReader(body))
+		}
+		var anyBody map[string]any
+		if err := json.Unmarshal(body, &anyBody); err != nil {
+			respondErr(w, 400, "bad_request", "invalid JSON body")
+			return
+		}
+		if _, ok := anyBody["messages"]; ok {
+			r.Body = io.NopCloser(bytes.NewReader(body))
+			s.handleChatCompletions(w, r)
+			return
+		}
+		if _, ok := anyBody["input"]; ok {
+			r.Body = io.NopCloser(bytes.NewReader(body))
+			s.handleResponses(w, r)
+			return
+		}
+		respondErr(w, 400, "bad_request", "unsupported /v1 payload, use /v1/chat/completions or /v1/responses")
+		return
+	default:
+		respondErr(w, 405, "method_not_allowed", "method not allowed")
+		return
+	}
+}
+
 func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	reqID := "req_" + strings.ReplaceAll(uuid.NewString(), "-", "")
@@ -240,11 +276,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		respondErr(w, 401, "unauthorized", "invalid API key")
 		return
 	}
-	selector, err := ResolveAccountHeader(r.Header.Get("X-Codex-Account"))
-	if err != nil {
-		respondErr(w, 400, "bad_request", err.Error())
-		return
-	}
+	selector := ""
 	var req ChatCompletionsRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		respondErr(w, 400, "bad_request", "invalid JSON body")
@@ -358,11 +390,7 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 		respondErr(w, 401, "unauthorized", "invalid API key")
 		return
 	}
-	selector, err := ResolveAccountHeader(r.Header.Get("X-Codex-Account"))
-	if err != nil {
-		respondErr(w, 400, "bad_request", err.Error())
-		return
-	}
+	selector := ""
 	var req ResponsesRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		respondErr(w, 400, "bad_request", "invalid JSON body")
@@ -524,11 +552,7 @@ func (s *Server) handleClaudeMessages(w http.ResponseWriter, r *http.Request) {
 		respondErr(w, 401, "unauthorized", "invalid API key")
 		return
 	}
-	selector, err := ResolveAccountHeader(r.Header.Get("X-Codex-Account"))
-	if err != nil {
-		respondErr(w, 400, "bad_request", err.Error())
-		return
-	}
+	selector := ""
 	var req ClaudeMessagesRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		respondErr(w, 400, "bad_request", "invalid JSON body")
@@ -858,7 +882,7 @@ func (s *Server) handleWebSettings(w http.ResponseWriter, r *http.Request) {
 	modelMappings := s.currentModelMappings()
 	respondJSON(w, 200, map[string]any{
 		"api_key":              s.currentAPIKey(),
-		"openai_endpoint":      strings.TrimRight(base, "/") + "/v1",
+		"openai_endpoint":      strings.TrimRight(base, "/") + "/v1/chat/completions",
 		"claude_endpoint":      strings.TrimRight(base, "/") + "/claude/v1/messages",
 		"openai_models_url":    strings.TrimRight(base, "/") + "/v1/models",
 		"openai_chat_url":      strings.TrimRight(base, "/") + "/v1/chat/completions",
@@ -959,7 +983,11 @@ func (s *Server) withTrafficLog(protocol string, next http.HandlerFunc) http.Han
 			r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 		}
 		start := time.Now()
-		rec := &trafficRecorder{ResponseWriter: w, status: http.StatusOK}
+		rec := &trafficRecorder{
+			ResponseWriter:    w,
+			status:            http.StatusOK,
+			responseBodyLimit: 4000,
+		}
 		next(rec, r)
 
 		model, stream := detectTrafficModelAndStream(r.URL.Path, bodyBytes)
@@ -967,26 +995,34 @@ func (s *Server) withTrafficLog(protocol string, next http.HandlerFunc) http.Han
 		if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
 			remote = host
 		}
+		responseBody := strings.TrimSpace(string(rec.responseBody))
+		if rec.bodyTruncated {
+			responseBody += "...(truncated)"
+		}
 		_ = s.traffic.Append(trafficlog.Entry{
-			Timestamp:   time.Now().UTC(),
-			Protocol:    protocol,
-			Method:      r.Method,
-			Path:        r.URL.Path,
-			Status:      rec.status,
-			LatencyMS:   time.Since(start).Milliseconds(),
-			RemoteAddr:  strings.TrimSpace(remote),
-			UserAgent:   strings.TrimSpace(r.UserAgent()),
-			AccountHint: strings.TrimSpace(r.Header.Get("X-Codex-Account")),
-			Model:       model,
-			Stream:      stream,
-			RequestBody: truncateForLog(string(bodyBytes), 2000),
+			Timestamp:    time.Now().UTC(),
+			Protocol:     protocol,
+			Method:       r.Method,
+			Path:         r.URL.Path,
+			Status:       rec.status,
+			LatencyMS:    time.Since(start).Milliseconds(),
+			RemoteAddr:   strings.TrimSpace(remote),
+			UserAgent:    strings.TrimSpace(r.UserAgent()),
+			AccountHint:  strings.TrimSpace(r.Header.Get("X-Codex-Account")),
+			Model:        model,
+			Stream:       stream,
+			RequestBody:  truncateForLog(string(bodyBytes), 2000),
+			ResponseBody: responseBody,
 		})
 	}
 }
 
 type trafficRecorder struct {
 	http.ResponseWriter
-	status int
+	status            int
+	responseBody      []byte
+	responseBodyLimit int
+	bodyTruncated     bool
 }
 
 func (r *trafficRecorder) WriteHeader(code int) {
@@ -997,6 +1033,19 @@ func (r *trafficRecorder) WriteHeader(code int) {
 func (r *trafficRecorder) Write(p []byte) (int, error) {
 	if r.status == 0 {
 		r.status = http.StatusOK
+	}
+	if r.responseBodyLimit > 0 && !r.bodyTruncated {
+		remaining := r.responseBodyLimit - len(r.responseBody)
+		if remaining > 0 {
+			if len(p) <= remaining {
+				r.responseBody = append(r.responseBody, p...)
+			} else {
+				r.responseBody = append(r.responseBody, p[:remaining]...)
+				r.bodyTruncated = true
+			}
+		} else {
+			r.bodyTruncated = true
+		}
 	}
 	return r.ResponseWriter.Write(p)
 }

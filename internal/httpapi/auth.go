@@ -1,15 +1,11 @@
 package httpapi
 
 import (
-	"errors"
 	"strings"
 )
 
 func ResolveAccountHeader(raw string) (string, error) {
 	v := strings.TrimSpace(raw)
-	if v == "" {
-		return "", errors.New("X-Codex-Account is required")
-	}
 	return v, nil
 }
 

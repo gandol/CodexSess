@@ -10,18 +10,19 @@ import (
 )
 
 type Entry struct {
-	Timestamp   time.Time `json:"timestamp"`
-	Protocol    string    `json:"protocol"`
-	Method      string    `json:"method"`
-	Path        string    `json:"path"`
-	Status      int       `json:"status"`
-	LatencyMS   int64     `json:"latency_ms"`
-	RemoteAddr  string    `json:"remote_addr"`
-	UserAgent   string    `json:"user_agent,omitempty"`
-	AccountHint string    `json:"account_hint,omitempty"`
-	Model       string    `json:"model,omitempty"`
-	Stream      bool      `json:"stream,omitempty"`
-	RequestBody string    `json:"request_body,omitempty"`
+	Timestamp    time.Time `json:"timestamp"`
+	Protocol     string    `json:"protocol"`
+	Method       string    `json:"method"`
+	Path         string    `json:"path"`
+	Status       int       `json:"status"`
+	LatencyMS    int64     `json:"latency_ms"`
+	RemoteAddr   string    `json:"remote_addr"`
+	UserAgent    string    `json:"user_agent,omitempty"`
+	AccountHint  string    `json:"account_hint,omitempty"`
+	Model        string    `json:"model,omitempty"`
+	Stream       bool      `json:"stream,omitempty"`
+	RequestBody  string    `json:"request_body,omitempty"`
+	ResponseBody string    `json:"response_body,omitempty"`
 }
 
 type Logger struct {
@@ -103,4 +104,3 @@ func (l *Logger) ReadTail(maxLines int) ([]string, error) {
 	}
 	return out, nil
 }
-

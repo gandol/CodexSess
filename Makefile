@@ -13,10 +13,7 @@ build: build-frontend build-backend
 build-frontend:
 	@echo "Building frontend from $(WEB_DIR)..."
 	cd $(WEB_DIR) && npm install && npm run build
-	@echo "Syncing built frontend assets to $(EMBED_ASSETS_DIR)..."
-	rm -rf $(EMBED_ASSETS_DIR)/assets
-	mkdir -p $(EMBED_ASSETS_DIR)
-	cp -r $(WEB_DIR)/dist/* $(EMBED_ASSETS_DIR)/
+	@echo "Frontend build output is configured directly to $(EMBED_ASSETS_DIR) via Vite outDir."
 
 build-backend:
 	@echo "Building backend binary $(BINARY_PATH)..."
@@ -48,7 +45,7 @@ clean:
 	@echo "Cleaning build artifacts..."
 	go clean
 	rm -f $(BINARY_PATH)
-	rm -rf tmp $(WEB_DIR)/dist $(WEB_DIR)/node_modules
+	@echo "Directory cleanup skipped (no rm dir policy)."
 
 test:
 	go test ./...
