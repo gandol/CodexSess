@@ -23,12 +23,12 @@
 
   <p>
     <a href="#overview">Overview</a> •
+    <a href="#installation-linux">Installation</a> •
     <a href="#core-capabilities">Core Capabilities</a> •
     <a href="#github-code-review-workflow">GitHub Code Review Workflow</a> •
     <a href="#ui-preview">UI Preview</a> •
     <a href="#authentication--session">Authentication</a> •
-    <a href="#environment-variables">Environment</a> •
-    <a href="#installation-linux">Installation</a>
+    <a href="#environment-variables">Environment</a>
   </p>
 </div>
 
@@ -54,6 +54,43 @@ Instead of juggling scripts, manual token edits, and separate dashboards, CodexS
 - active CLI account control
 - account usage visibility
 - automated fallback decisions when limits are low
+
+## Installation (Linux)
+
+Use installer from repository raw script:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/rickicode/CodexSess/main/scripts/install.sh | bash
+```
+
+Mode examples:
+
+```bash
+# auto (default)
+curl -fsSL https://raw.githubusercontent.com/rickicode/CodexSess/main/scripts/install.sh | bash -s -- --mode auto
+
+# gui package install (.deb/.rpm)
+curl -fsSL https://raw.githubusercontent.com/rickicode/CodexSess/main/scripts/install.sh | bash -s -- --mode gui
+
+# server / cli install
+curl -fsSL https://raw.githubusercontent.com/rickicode/CodexSess/main/scripts/install.sh | bash -s -- --mode server
+
+# update existing install type (auto-detect gui/server)
+curl -fsSL https://raw.githubusercontent.com/rickicode/CodexSess/main/scripts/install.sh | bash -s -- --mode update
+```
+
+GUI mode bind override (via `~/.bashrc`):
+
+```bash
+echo 'export CODEXSESS_BIND_ADDR=0.0.0.0:3061' >> ~/.bashrc
+source ~/.bashrc
+```
+
+Then restart CodexSess GUI session.
+
+Windows installation:
+- Download `.exe` directly from:
+  - https://github.com/rickicode/CodexSess/releases/latest
 
 ## Core Capabilities
 
@@ -134,43 +171,6 @@ Behavior:
 Notes:
 - On Windows, data directory defaults to `%APPDATA%\\codexsess` when `APPDATA` is available.
 - `CODEX_HOME` is set internally per selected account and is not intended as an external switch for CodexSess itself.
-
-## Installation (Linux)
-
-Use installer from repository raw script:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/rickicode/CodexSess/main/scripts/install.sh | bash
-```
-
-Mode examples:
-
-```bash
-# auto (default)
-curl -fsSL https://raw.githubusercontent.com/rickicode/CodexSess/main/scripts/install.sh | bash -s -- --mode auto
-
-# gui package install (.deb/.rpm)
-curl -fsSL https://raw.githubusercontent.com/rickicode/CodexSess/main/scripts/install.sh | bash -s -- --mode gui
-
-# server / cli install
-curl -fsSL https://raw.githubusercontent.com/rickicode/CodexSess/main/scripts/install.sh | bash -s -- --mode server
-
-# update existing install type (auto-detect gui/server)
-curl -fsSL https://raw.githubusercontent.com/rickicode/CodexSess/main/scripts/install.sh | bash -s -- --mode update
-```
-
-GUI mode bind override (via `~/.bashrc`):
-
-```bash
-echo 'export CODEXSESS_BIND_ADDR=0.0.0.0:3061' >> ~/.bashrc
-source ~/.bashrc
-```
-
-Then restart CodexSess GUI session.
-
-Windows installation:
-- Download `.exe` directly from:
-  - https://github.com/rickicode/CodexSess/releases/latest
 
 ## Project Scope
 
