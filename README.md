@@ -67,7 +67,7 @@ Use the latest published binaries from GitHub Releases:
 
 ## CLI Installer
 
-Each release includes an `install.sh` script for automatic installation.
+Installer script is maintained in this repository (`scripts/install.sh`) and can be executed directly via raw URL.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/rickicode/CodexSess/main/scripts/install.sh | bash
