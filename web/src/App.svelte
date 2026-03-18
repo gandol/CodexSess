@@ -52,6 +52,7 @@
   let uiPrefsLoaded = $state(false);
   let accountSearchQuery = $state('');
   let accountTypeFilter = $state('all');
+  let mobileSidebarOpen = $state(false);
 
   const appMode = (import.meta.env.VITE_APP_MODE || 'web').toLowerCase();
 
@@ -210,6 +211,34 @@
 
   function setAccountTypeFilter(value) {
     accountTypeFilter = value;
+  }
+
+  function toggleMobileSidebar() {
+    mobileSidebarOpen = !mobileSidebarOpen;
+  }
+
+  function closeMobileSidebar() {
+    mobileSidebarOpen = false;
+  }
+
+  function switchMenu(menu) {
+    activeMenu = menu;
+    closeMobileSidebar();
+  }
+
+  function documentTitleByMenu(menu) {
+    const base = 'CodexSess Console';
+    const key = String(menu || '').trim().toLowerCase();
+    switch (key) {
+      case 'settings':
+        return `Settings - ${base}`;
+      case 'logs':
+        return `API Logs - ${base}`;
+      case 'about':
+        return `About - ${base}`;
+      default:
+        return base;
+    }
   }
 
   function formatDurationLabelFromMinutes(totalMinutes) {
@@ -1392,13 +1421,12 @@
         browserLoginURL = '';
         browserLoginID = '';
         clearBrowserWaitTimer();
+        closeAddAccountModal();
+        setStatus('Browser callback login success. Account added.', 'success');
         const usageRefresh = await refreshUsageForSelectors(newIDs);
         if (usageRefresh.refreshed > 0) {
           setStatus(`Browser callback login success. Usage refreshed for ${usageRefresh.refreshed}/${usageRefresh.total} account(s).`, 'success');
-        } else {
-          setStatus('Browser callback login success. Account added.', 'success');
         }
-        closeAddAccountModal();
       }
     } catch {
       // keep waiting silently
@@ -1555,8 +1583,19 @@
       setStatus(error.message, 'error');
     });
 
+    const onResize = () => {
+      if (window.innerWidth > 760) closeMobileSidebar();
+    };
+    const onEsc = (event) => {
+      if (event.key === 'Escape') closeMobileSidebar();
+    };
+    window.addEventListener('resize', onResize);
+    window.addEventListener('keydown', onEsc);
+
     return () => {
       window.removeEventListener('beforeunload', onBeforeUnload);
+      window.removeEventListener('resize', onResize);
+      window.removeEventListener('keydown', onEsc);
       cancelBrowserLoginSession();
       clearPollTimer();
       clearBrowserWaitTimer();
@@ -1628,7 +1667,7 @@
 </script>
 
 <svelte:head>
-  <title>codexsess console</title>
+  <title>{documentTitleByMenu(activeMenu)}</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
@@ -1638,33 +1677,33 @@
   />
 </svelte:head>
 
-<div class="app-root" data-app-mode={appMode}>
-  <aside class="sidebar">
+<div class="app-root {mobileSidebarOpen ? 'mobile-sidebar-open' : ''}" data-app-mode={appMode}>
+  <aside class="sidebar {mobileSidebarOpen ? 'is-open' : ''}">
     <div class="brand">
       <strong>CodexSess</strong>
       <span>Codex Account Management</span>
     </div>
 
     <nav class="nav" aria-label="Main menu">
-      <button class={activeMenu === 'dashboard' ? 'is-active' : ''} onclick={() => (activeMenu = 'dashboard')}>
+      <button class={activeMenu === 'dashboard' ? 'is-active' : ''} onclick={() => switchMenu('dashboard')}>
         <span class="nav-icon" aria-hidden="true">
           <svg viewBox="0 0 24 24"><path d="M3 3h8v8H3V3zm10 0h8v5h-8V3zM3 13h5v8H3v-8zm7 0h11v8H10v-8z"></path></svg>
         </span>
         <span>Dashboard</span>
       </button>
-      <button class={activeMenu === 'settings' ? 'is-active' : ''} onclick={() => (activeMenu = 'settings')}>
+      <button class={activeMenu === 'settings' ? 'is-active' : ''} onclick={() => switchMenu('settings')}>
         <span class="nav-icon" aria-hidden="true">
           <svg viewBox="0 0 24 24"><path d="M19.14 12.94a7.96 7.96 0 000-1.88l2.03-1.58-1.92-3.32-2.39.96a8.1 8.1 0 00-1.62-.94L14.9 3h-3.8l-.34 2.18c-.56.22-1.1.52-1.6.9l-2.42-.98-1.9 3.32 2.02 1.6a8.2 8.2 0 000 1.86l-2.03 1.58 1.92 3.34 2.41-.98c.5.38 1.03.7 1.6.92L11.1 21h3.8l.34-2.2c.58-.22 1.12-.52 1.62-.9l2.4.96 1.9-3.32-2.02-1.6zM13 15a3 3 0 110-6 3 3 0 010 6z"></path></svg>
         </span>
         <span>Settings</span>
       </button>
-      <button class={activeMenu === 'logs' ? 'is-active' : ''} onclick={() => (activeMenu = 'logs')}>
+      <button class={activeMenu === 'logs' ? 'is-active' : ''} onclick={() => switchMenu('logs')}>
         <span class="nav-icon" aria-hidden="true">
           <svg viewBox="0 0 24 24"><path d="M4 4h16v4H4V4zm0 6h16v10H4V10zm3 3v4h2v-4H7zm4 0v4h2v-4h-2zm4 0v4h2v-4h-2z"></path></svg>
         </span>
         <span>API Logs</span>
       </button>
-      <button class={activeMenu === 'about' ? 'is-active' : ''} onclick={() => (activeMenu = 'about')}>
+      <button class={activeMenu === 'about' ? 'is-active' : ''} onclick={() => switchMenu('about')}>
         <span class="nav-icon" aria-hidden="true">
           <svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 100 20 10 10 0 000-20zm0 4a1.4 1.4 0 110 2.8A1.4 1.4 0 0112 6zm-1.5 5h3v7h-3v-7z"></path></svg>
         </span>
@@ -1680,6 +1719,14 @@
   </aside>
 
   <main class="content {activeMenu === 'logs' ? 'content-logs' : ''}">
+    <div class="mobile-topbar">
+      <button class="mobile-burger" type="button" aria-label="Toggle menu" onclick={toggleMobileSidebar}>
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M4 6h16v2H4V6zm0 5h16v2H4v-2zm0 5h16v2H4v-2z"></path>
+        </svg>
+      </button>
+      <strong>{documentTitleByMenu(activeMenu)}</strong>
+    </div>
     <section class="status-banner status-{statusClass(status.kind)}" aria-live="polite">
       <span class="status-icon">{statusIcon(status.kind)}</span>
       <p>{status.text}</p>
@@ -1794,6 +1841,10 @@
       />
     {/if}
   </main>
+
+  {#if mobileSidebarOpen}
+    <button class="sidebar-overlay" type="button" aria-label="Close menu" onclick={closeMobileSidebar}></button>
+  {/if}
 
   {#if showAddAccountModal}
     <div

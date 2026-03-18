@@ -1,23 +1,58 @@
-# CodexSess
+# CodexSess Console
 
-[English](./README.md) | [Bahasa Indonesia](./README.id.md)
+<div align="center">
+  <img src="./codexsess.png" alt="CodexSess Logo" width="120" height="120">
 
-CodexSess is a web-first account management gateway for Codex/OpenAI usage.
-It provides an OpenAI-compatible API surface and a built-in management console in one binary.
+  <h3>Web-First Control Plane for Codex Account Operations</h3>
+  <p>Manage multi-account API/CLI routing, usage-aware automation, and OpenAI-compatible proxy endpoints in one binary.</p>
 
-## What CodexSess Is
+  <p>
+    <a href="https://github.com/rickicode/CodexSess/releases/latest">
+      <img src="https://img.shields.io/github/v/release/rickicode/CodexSess?style=flat-square" alt="Latest Release">
+    </a>
+    <img src="https://img.shields.io/badge/Backend-Go-00ADD8?style=flat-square" alt="Go">
+    <img src="https://img.shields.io/badge/Frontend-Svelte-FF3E00?style=flat-square" alt="Svelte">
+    <img src="https://img.shields.io/badge/Mode-Web--First-2f855a?style=flat-square" alt="Web First">
+    <img src="https://img.shields.io/badge/Platform-Linux%20%7C%20Windows-3b82f6?style=flat-square" alt="Platform">
+  </p>
 
-CodexSess is designed to sit between your clients and Codex/OpenAI access tokens.
-It helps you manage multiple accounts, choose which account is active for API and CLI flows, monitor usage, and switch quickly when limits are low.
+  <p>
+    <a href="./README.md"><strong>English</strong></a> |
+    <a href="./README.id.md">Bahasa Indonesia</a>
+  </p>
 
-## Why This Project Exists
+  <p>
+    <a href="#overview">Overview</a> •
+    <a href="#core-capabilities">Core Capabilities</a> •
+    <a href="#ui-preview">UI Preview</a> •
+    <a href="#authentication--session">Authentication</a> •
+    <a href="#environment-variables">Environment</a> •
+    <a href="#installation-linux">Installation</a>
+  </p>
+</div>
 
-CodexSess was created to:
-- simplify multi-account Codex management in one place
-- separate active account selection for API and Codex CLI
-- reduce downtime by enabling fast account switching
-- provide a practical web console without extra setup complexity
-- run in web mode on Linux/Windows with the same operational flow
+## Overview
+
+CodexSess is a web-first account gateway for Codex/OpenAI usage.
+
+It is designed for operators who need:
+- fast account switching
+- separate active account targets for API and Codex CLI
+- usage-aware automation (alert + auto switch)
+- OpenAI-compatible API surface in production-friendly form
+
+For normal usage, download binaries/packages from the latest release page:
+- https://github.com/rickicode/CodexSess/releases/latest
+
+## Why CodexSess Exists
+
+CodexSess was built to simplify multi-account Codex operations without splitting tools.
+
+Instead of juggling scripts, manual token edits, and separate dashboards, CodexSess centralizes:
+- active API account control
+- active CLI account control
+- account usage visibility
+- automated fallback decisions when limits are low
 
 ## Core Capabilities
 
@@ -25,89 +60,89 @@ CodexSess was created to:
   - `POST /v1/chat/completions` (including SSE streaming)
   - `GET /v1/models`
   - `POST /v1/responses`
-- Multi-account management UI
-- Manual and automated account switching logic
-- Usage refresh/monitoring integration
-- Single-binary deployment with embedded SPA
+- Separate active account state:
+  - API active account
+  - CLI (Codex) active account
+- Usage refresh and automation:
+  - threshold alerts
+  - configurable auto-switch behavior
+- Embedded web console and API proxy in one binary
 
-## Authentication and Session
+## UI Preview
 
-- Management console login uses local admin credentials
-- Default credential on first run:
+<p align="center">
+  <img src="./screenshots/codexsess-dashboard.png" alt="CodexSess Dashboard" width="92%">
+</p>
+
+<p align="center">
+  <img src="./screenshots/codexsess-settings.png" alt="CodexSess Settings" width="92%">
+</p>
+
+<p align="center">
+  <img src="./screenshots/codexsess-apilogs.png" alt="CodexSess API Logs" width="92%">
+</p>
+
+<p align="center">
+  <img src="./screenshots/codexsess-about.png" alt="CodexSess About" width="92%">
+</p>
+
+## Authentication & Session
+
+- Management console requires login.
+- First-run default credential:
   - username: `admin`
   - password: `hijilabs`
-- Session is remembered for 30 days via cookie
-- Password can be changed via CLI:
+- Session remember duration: 30 days.
+- Password change via CLI:
   - `--changepassword`
 
-## API Compatibility Scope
-
-- Management routes are protected by web login
-- API compatibility routes under `/v1/*` and `/claude/v1/*` keep API-key style access
+API compatibility routes under `/v1/*` and `/claude/v1/*` remain API-key style routes and are not blocked by web login UI flow.
 
 ## Environment Variables
 
 | Variable | Default | Example | Description |
 |---|---|---|---|
 | `PORT` | `3061` | `PORT=8080` | HTTP server port. Bind address is `127.0.0.1:<PORT>`. |
-| `CODEXSESS_NO_OPEN_BROWSER` | `false` (auto-open enabled) | `CODEXSESS_NO_OPEN_BROWSER=true` | Disable automatic browser opening on startup. Truthy values: `1`, `true`, `yes`. |
-| `CODEXSESS_CODEX_SANDBOX` | `workspace-write` | `CODEXSESS_CODEX_SANDBOX=read-only` | Sandbox mode passed to `codex exec`. Supported values depend on Codex CLI (for example: `read-only`, `workspace-write`, `danger-full-access`). |
-| `CODEXSESS_CLEAN_EXEC` | `true` | `CODEXSESS_CLEAN_EXEC=false` | Run Codex API execution in clean/isolated mode. `true` isolates `HOME`/`XDG_*` and uses ephemeral Codex session; `false` uses normal environment. |
+| `CODEXSESS_NO_OPEN_BROWSER` | `false` | `CODEXSESS_NO_OPEN_BROWSER=true` | Disable automatic browser opening on startup. Truthy values: `1`, `true`, `yes`. |
+| `CODEXSESS_CODEX_SANDBOX` | `workspace-write` | `CODEXSESS_CODEX_SANDBOX=read-only` | Sandbox mode passed to `codex exec`. |
+| `CODEXSESS_CLEAN_EXEC` | `true` | `CODEXSESS_CLEAN_EXEC=false` | Run Codex execution in isolated mode (`true`) or normal environment (`false`). |
 
 Notes:
 - On Windows, data directory defaults to `%APPDATA%\\codexsess` when `APPDATA` is available.
-- `CODEX_HOME` is set internally per selected account and is not intended as an external runtime switch for CodexSess itself.
+- `CODEX_HOME` is set internally per selected account and is not intended as an external switch for CodexSess itself.
 
-## Get It
+## Installation (Linux)
 
-Do not build manually for normal usage.
-Use the latest published binaries from GitHub Releases:
-
-- Latest release: https://github.com/rickicode/CodexSess/releases/latest
-
-## CLI Installer
-
-Installer script is maintained in this repository (`scripts/install.sh`) and can be executed directly via raw URL.
-This installer is Linux-only.
-For Windows, download the `.exe` binary directly from the latest release page.
+Use installer from repository raw script:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/rickicode/CodexSess/main/scripts/install.sh | bash
 ```
 
-Mode-specific one-liners:
+Mode examples:
 
 ```bash
 # auto (default)
 curl -fsSL https://raw.githubusercontent.com/rickicode/CodexSess/main/scripts/install.sh | bash -s -- --mode auto
 
-# gui (linux desktop package)
+# gui package install (.deb/.rpm)
 curl -fsSL https://raw.githubusercontent.com/rickicode/CodexSess/main/scripts/install.sh | bash -s -- --mode gui
 
-# server / cli
+# server / cli install
 curl -fsSL https://raw.githubusercontent.com/rickicode/CodexSess/main/scripts/install.sh | bash -s -- --mode server
 
-# update existing install (auto-detects gui/server)
+# update existing install type (auto-detect gui/server)
 curl -fsSL https://raw.githubusercontent.com/rickicode/CodexSess/main/scripts/install.sh | bash -s -- --mode update
 ```
 
-Installer modes:
-- `--mode auto` (default): detects desktop/server environment automatically
-- `--mode gui`: installs `.deb`/`.rpm` GUI package on Linux
-- `--mode server`: downloads and installs release binary directly (CLI/server mode)
-- `--mode update`: detects existing install type (`gui`/`server`) and updates it automatically
+Windows installation:
+- Download `.exe` directly from:
+  - https://github.com/rickicode/CodexSess/releases/latest
 
-Examples:
-- `bash install.sh --mode gui`
-- `bash install.sh --mode server --bin-dir /usr/local/bin`
-- `bash install.sh --mode update`
-- `bash install.sh --version v1.0.1`
+## Project Scope
 
-Server mode notes:
-- On Linux, server install/update automatically provisions and restarts `codexsess.service` via `systemd`.
-- Service runs with `CODEXSESS_NO_OPEN_BROWSER=1` to stay headless.
-
-## Project Goal
-
-CodexSess focuses on operational reliability for account-based Codex usage:
-clear active-state control, usage-aware switching, and predictable API behavior.
+CodexSess focuses on operational reliability for Codex account usage:
+- predictable account selection
+- clear active-state visibility
+- usage-aware automation and fallback
+- OpenAI-compatible integration surface

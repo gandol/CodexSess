@@ -40,8 +40,20 @@
     <section class="setting-category">
       <h3 class="setting-category-title">CodexSess</h3>
       <div class="setting-row">
-        <p class="setting-title">CodexSess is a web-first account management gateway for Codex/OpenAI usage.</p>
-        <p class="setting-title">It provides account switching, usage automation, and OpenAI-compatible proxy APIs in one binary.</p>
+        <p class="setting-title"><strong>CodexSess</strong> is an operational console for teams running multiple Codex accounts in production workflows.</p>
+        <p class="setting-title">It centralizes account lifecycle, active-session routing, usage visibility, and OpenAI-compatible API proxying in one runtime.</p>
+        <p class="setting-title">Designed for high-uptime usage: separate API and CLI active account control, fast failover when limits are low, and one dashboard for day-to-day operations.</p>
+        <p class="setting-title">Use CodexSess when you need predictable account switching behavior, clearer usage signals, and less manual overhead during sustained automation.</p>
+      </div>
+    </section>
+
+    <section class="setting-category">
+      <h3 class="setting-category-title">By HIJINetwork</h3>
+      <div class="setting-row">
+        <p class="setting-title">HIJINetwork provides VPN, hosted apps, licensed applications, and digital products for online business operations.</p>
+        <div class="panel-actions">
+          <a class="btn btn-primary" href="https://hijinetwork.net" target="_blank" rel="noreferrer">Visit HIJINetwork</a>
+        </div>
       </div>
     </section>
 
@@ -70,7 +82,7 @@
     </section>
 
     <section class="setting-category">
-      <h3 class="setting-category-title">Latest Changelog</h3>
+      <h3 class="setting-category-title">Latest Changelog {latestVersion ? `v${latestVersion}` : (appVersion ? `v${appVersion}` : '')}</h3>
       <div class="setting-row">
         {#if latestChangelog}
           <div class="code-box">
