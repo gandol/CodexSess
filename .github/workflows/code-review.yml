@@ -146,6 +146,41 @@ jobs:
           jq empty "$HOME/.codex/auth.json"
           chmod 600 "$HOME/.codex/auth.json"
 
+      - name: Configure default MCP servers for Codex (CI)
+        env:
+          EXA_API_KEY: ${{ secrets.EXA_API_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.codex"
+          cat > "$HOME/.codex/config.toml" <<EOF
+          [mcp_servers.filesystem]
+          command = "npx"
+          args = ["-y", "@modelcontextprotocol/server-filesystem", "${GITHUB_WORKSPACE}"]
+
+          [mcp_servers.sequential_thinking]
+          command = "npx"
+          args = ["-y", "@modelcontextprotocol/server-sequential-thinking"]
+
+          [mcp_servers.memory]
+          command = "npx"
+          args = ["-y", "@modelcontextprotocol/server-memory"]
+          EOF
+
+          if [ -n "${EXA_API_KEY:-}" ]; then
+            cat >> "$HOME/.codex/config.toml" <<EOF
+
+          [mcp_servers.exa]
+          command = "npx"
+          args = ["-y", "exa-mcp-server"]
+
+          [mcp_servers.exa.env]
+          EXA_API_KEY = "${EXA_API_KEY}"
+          EOF
+            echo "EXA MCP enabled (EXA_API_KEY is set)."
+          else
+            echo "EXA MCP disabled (EXA_API_KEY is not set)."
+          fi
+
       - name: Build review diff
         id: diff
         run: |

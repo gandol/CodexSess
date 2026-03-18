@@ -146,6 +146,8 @@ To use CodexSess automated PR review/autofix in GitHub:
 - Add required repository secrets:
   - `CODEXSESS_URL`
   - `CODEXSESS_API_KEY`
+- Optional secret:
+  - `EXA_API_KEY` (enables Exa MCP server in workflow)
 - Trigger modes:
   - automatic on `pull_request` events
   - manual via `workflow_dispatch`
@@ -157,6 +159,11 @@ To use CodexSess automated PR review/autofix in GitHub:
 Behavior:
 - Automatic PR run: posts review to PR and pushes autofix to PR branch when allowed.
 - Manual run: reviews selected `target_ref`; if autofix exists, workflow creates and pushes a new branch automatically.
+- Workflow configures default MCP servers for Codex in CI:
+  - `filesystem` (free)
+  - `sequential_thinking` (free)
+  - `memory` (free)
+  - `exa` (enabled when `EXA_API_KEY` is provided)
 
 ## Environment Variables
 

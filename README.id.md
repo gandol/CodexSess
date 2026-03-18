@@ -109,6 +109,8 @@ Untuk menggunakan review/autofix PR:
 - Tambahkan GitHub repository secret wajib:
   - `CODEXSESS_URL`
   - `CODEXSESS_API_KEY`
+- Secret opsional:
+  - `EXA_API_KEY` (untuk mengaktifkan Exa MCP di workflow)
 - Trigger:
   - otomatis saat event `pull_request`
   - manual lewat `workflow_dispatch`
@@ -121,6 +123,11 @@ Catatan:
 - `review_scope=full` membuat review mencakup keseluruhan repository (tidak tergantung diff commit saja).
 - `review_focus` dipakai untuk mengarahkan review manual ke area tertentu (contoh: `auth`, `api`, `performance`, `tests`).
 - Run manual akan membuat branch baru otomatis jika ada autofix yang aman untuk di-push.
+- Workflow akan mengatur MCP default untuk Codex di CI:
+  - `filesystem` (gratis)
+  - `sequential_thinking` (gratis)
+  - `memory` (gratis)
+  - `exa` (aktif jika `EXA_API_KEY` tersedia)
 
 ## Variabel Lingkungan
 
