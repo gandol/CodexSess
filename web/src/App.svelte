@@ -34,6 +34,7 @@
   let usageAutoSwitchThresholdInput = $state('2');
   let usageSoundEnabled = $state(true);
   let appVersion = $state('dev');
+  let codexVersion = $state('unknown');
   let latestVersion = $state('');
   let releaseURL = $state('');
   let latestChangelog = $state('');
@@ -784,6 +785,7 @@
       mappingTargetModel = availableModels[0];
     }
     appVersion = String(data.app_version || 'dev').trim() || 'dev';
+    codexVersion = String(data.codex_version || 'unknown').trim() || 'unknown';
     latestVersion = String(data.latest_version || '').trim();
     releaseURL = String(data.release_url || '').trim();
     latestChangelog = String(data.latest_changelog || '').trim();
@@ -1023,14 +1025,47 @@
     return copiedAction === key;
   }
 
+  async function writeClipboardText(text) {
+    const value = String(text || '');
+    if (!value) return false;
+
+    try {
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(value);
+        return true;
+      }
+    } catch {
+      // Fallback below for non-secure context / denied clipboard permissions.
+    }
+
+    try {
+      const textarea = document.createElement('textarea');
+      textarea.value = value;
+      textarea.setAttribute('readonly', '');
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      textarea.style.pointerEvents = 'none';
+      textarea.style.top = '-1000px';
+      document.body.appendChild(textarea);
+      textarea.focus();
+      textarea.select();
+      textarea.setSelectionRange(0, textarea.value.length);
+      const ok = Boolean(document.execCommand && document.execCommand('copy'));
+      document.body.removeChild(textarea);
+      return ok;
+    } catch {
+      return false;
+    }
+  }
+
   async function copyText(value, label, key = '') {
     const text = String(value || '').trim();
     if (!text) return;
-    try {
-      await navigator.clipboard.writeText(text);
+    const copied = await writeClipboardText(text);
+    if (copied) {
       markCopied(key);
       setStatus(`${label} copied.`, 'success');
-    } catch {
+    } else {
       setStatus(`Failed to copy ${label}.`, 'error');
     }
   }
@@ -1731,6 +1766,7 @@
     <div class="brand">
       <strong>CodexSess</strong>
       <span>Codex Account Management</span>
+      <small class="brand-meta">Codex CLI: {codexVersion}</small>
     </div>
 
     <nav class="nav" aria-label="Main menu">

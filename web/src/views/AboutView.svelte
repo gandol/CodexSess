@@ -15,15 +15,44 @@
 
   const updateScriptCommand = 'curl -fsSL https://raw.githubusercontent.com/rickicode/CodexSess/main/scripts/install.sh | bash -s -- --mode update';
 
-  async function copyUpdateScript() {
+  async function writeClipboardText(text) {
+    const value = String(text || '');
+    if (!value) return false;
     try {
-      if (!navigator?.clipboard?.writeText) return;
-      await navigator.clipboard.writeText(updateScriptCommand);
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(value);
+        return true;
+      }
+    } catch {
+      // Continue to fallback copy flow.
+    }
+    try {
+      const textarea = document.createElement('textarea');
+      textarea.value = value;
+      textarea.setAttribute('readonly', '');
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      textarea.style.pointerEvents = 'none';
+      textarea.style.top = '-1000px';
+      document.body.appendChild(textarea);
+      textarea.focus();
+      textarea.select();
+      textarea.setSelectionRange(0, textarea.value.length);
+      const ok = Boolean(document.execCommand && document.execCommand('copy'));
+      document.body.removeChild(textarea);
+      return ok;
+    } catch {
+      return false;
+    }
+  }
+
+  async function copyUpdateScript() {
+    const copiedOK = await writeClipboardText(updateScriptCommand);
+    if (copiedOK) {
       copied = true;
       setTimeout(() => {
         copied = false;
       }, 1400);
-    } catch {
     }
   }
 </script>

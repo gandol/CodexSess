@@ -90,6 +90,48 @@ has_cmd() {
   command -v "$1" >/dev/null 2>&1
 }
 
+ensure_npm_installed() {
+  if has_cmd npm; then
+    return
+  fi
+  log "npm not found, installing npm..."
+  if has_cmd apt-get; then
+    run_root apt-get update -y
+    run_root apt-get install -y npm
+  elif has_cmd dnf; then
+    run_root dnf install -y npm
+  elif has_cmd yum; then
+    run_root yum install -y npm
+  elif has_cmd pacman; then
+    run_root pacman -Sy --noconfirm npm
+  elif has_cmd zypper; then
+    run_root zypper install -y npm
+  else
+    err "unable to install npm automatically. install npm manually, then rerun installer."
+    exit 1
+  fi
+  if ! has_cmd npm; then
+    err "npm installation failed or npm not in PATH"
+    exit 1
+  fi
+  ok "npm installed"
+}
+
+ensure_codex_cli() {
+  if has_cmd codex; then
+    ok "codex CLI detected: $(command -v codex)"
+    return
+  fi
+  ensure_npm_installed
+  log "codex CLI not found, installing @openai/codex globally..."
+  run_root npm i -g @openai/codex
+  if ! has_cmd codex; then
+    err "codex CLI installation failed or codex not in PATH after npm install"
+    exit 1
+  fi
+  ok "codex CLI installed: $(command -v codex)"
+}
+
 detect_arch() {
   local raw
   raw="$(uname -m | tr '[:upper:]' '[:lower:]')"
@@ -367,6 +409,8 @@ main() {
         ;;
     esac
   fi
+
+  ensure_codex_cli
 
   case "${MODE}" in
     gui)

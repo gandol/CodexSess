@@ -27,6 +27,12 @@ The format follows Keep a Changelog and uses semantic version tags (`vMAJOR.MINO
 - Startup logging now adds explicit `public bind enabled` line when bind host is `0.0.0.0` or `::`.
 - API request routing now applies backend auto-switch consistently across `/v1/chat/completions`, `/v1/responses`, `/v1/messages`, and `/v1/code-review`: if active account quota is exhausted, it switches to the best available account; if all are exhausted, it returns quota exhaustion.
 - First-account bootstrap now auto-selects the very first added account as both API active and CLI (Codex) active when account storage is empty.
+- Copy actions now include a non-secure-context fallback (`execCommand`) so copy buttons keep working when accessing CodexSess via IP over HTTP.
+- Installer now enforces Codex CLI availability: it auto-installs `npm` when missing and then installs `@openai/codex` globally when `codex` is not found.
+- Runtime now performs fail-fast Codex CLI checks (`PATH` + executable test via `codex --version`) before starting the server.
+- Added configurable Codex binary resolution (`codex_bin` in config / `CODEXSESS_CODEX_BIN` env), and runtime now resolves/stores absolute binary path for all Codex exec calls.
+- Startup Codex binary detection now includes explicit Windows fallback resolution (`codex.cmd` / `.exe` / `.bat`) and exposes detected Codex CLI version in web settings payload.
+- Sidebar header now displays `Codex CLI` version directly under `Codex Account Management`.
 
 ## [1.0.1] - 2026-03-18
 

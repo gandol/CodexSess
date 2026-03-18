@@ -85,7 +85,21 @@ func run() error {
 	}
 
 	svc := service.New(cfg, st, cry)
-	srv := httpapi.New(svc, cfg.BindAddr, cfg.ProxyAPIKey, cfg.AdminUsername, cfg.AdminPasswordHash, traffic, effectiveAppVersion())
+	resolvedCodexBin, codexVersion, err := ensureCodexCLIReady(svc.Codex.Binary)
+	if err != nil {
+		return err
+	}
+	svc.Codex.Binary = resolvedCodexBin
+	srv := httpapi.New(
+		svc,
+		cfg.BindAddr,
+		cfg.ProxyAPIKey,
+		cfg.AdminUsername,
+		cfg.AdminPasswordHash,
+		traffic,
+		effectiveAppVersion(),
+		codexVersion,
+	)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -104,6 +118,55 @@ func run() error {
 		return err
 	}
 	return nil
+}
+
+func ensureCodexCLIReady(binary string) (string, string, error) {
+	name := strings.TrimSpace(binary)
+	if name == "" {
+		name = "codex"
+	}
+	path, err := resolveCodexPath(name)
+	if err != nil {
+		return "", "", fmt.Errorf("codex CLI not found in PATH. install with: npm i -g @openai/codex")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, path, "--version")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", "", fmt.Errorf("codex CLI is not executable (%s). verify installation and PATH", path)
+	}
+	version := strings.TrimSpace(string(out))
+	if idx := strings.IndexByte(version, '\n'); idx >= 0 {
+		version = strings.TrimSpace(version[:idx])
+	}
+	if version == "" {
+		version = "unknown"
+	}
+	return path, version, nil
+}
+
+func resolveCodexPath(binary string) (string, error) {
+	name := strings.TrimSpace(binary)
+	if name == "" {
+		name = "codex"
+	}
+	if path, err := exec.LookPath(name); err == nil {
+		return path, nil
+	}
+	if runtime.GOOS != "windows" {
+		return "", exec.ErrNotFound
+	}
+	if strings.ContainsAny(name, `\/`) {
+		return "", exec.ErrNotFound
+	}
+	candidates := []string{name + ".cmd", name + ".exe", name + ".bat"}
+	for _, candidate := range candidates {
+		if path, err := exec.LookPath(candidate); err == nil {
+			return path, nil
+		}
+	}
+	return "", exec.ErrNotFound
 }
 
 func effectiveAppVersion() string {

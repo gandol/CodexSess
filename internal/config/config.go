@@ -22,6 +22,7 @@ type Config struct {
 	MasterKeyPath            string            `yaml:"master_key_path"`
 	AuthStoreDir             string            `yaml:"auth_store_dir"`
 	CodexHome                string            `yaml:"codex_home"`
+	CodexBin                 string            `yaml:"codex_bin"`
 	ProxyAPIKey              string            `yaml:"codexsess_api_key"`
 	ModelMappings            map[string]string `yaml:"model_mappings"`
 	UsageAlertThreshold      int               `yaml:"usage_alert_threshold"`
@@ -40,6 +41,7 @@ func Default() Config {
 		MasterKeyPath:            filepath.Join(base, "master.key"),
 		AuthStoreDir:             filepath.Join(base, "auth-accounts"),
 		CodexHome:                filepath.Join(home, ".codex"),
+		CodexBin:                 resolveCodexBin(""),
 		ModelMappings:            map[string]string{},
 		UsageAlertThreshold:      5,
 		UsageAutoSwitchThreshold: 2,
@@ -88,6 +90,7 @@ func LoadOrInit() (Config, error) {
 	if strings.TrimSpace(cfg.CodexHome) == "" {
 		cfg.CodexHome = def.CodexHome
 	}
+	cfg.CodexBin = resolveCodexBin(cfg.CodexBin)
 	if cfg.ModelMappings == nil {
 		cfg.ModelMappings = map[string]string{}
 	}
@@ -155,6 +158,16 @@ func resolveBindAddr() string {
 		}
 	}
 	return fmt.Sprintf("0.0.0.0:%d", port)
+}
+
+func resolveCodexBin(current string) string {
+	if raw := strings.TrimSpace(os.Getenv("CODEXSESS_CODEX_BIN")); raw != "" {
+		return raw
+	}
+	if raw := strings.TrimSpace(current); raw != "" {
+		return raw
+	}
+	return "codex"
 }
 
 func defaultDataDir(home string) string {

@@ -37,6 +37,7 @@ type Server struct {
 	adminPasswordHash string
 	traffic           *trafficlog.Logger
 	appVersion        string
+	codexVersion      string
 
 	updateMu              sync.Mutex
 	updateCheckedAt       time.Time
@@ -54,7 +55,7 @@ const (
 	maxCodeReviewInputChars        = 400_000
 )
 
-func New(svc *service.Service, bindAddr string, apiKey string, adminUsername string, adminPasswordHash string, traffic *trafficlog.Logger, appVersion string) *Server {
+func New(svc *service.Service, bindAddr string, apiKey string, adminUsername string, adminPasswordHash string, traffic *trafficlog.Logger, appVersion string, codexVersion string) *Server {
 	return &Server{
 		svc:               svc,
 		bindAddr:          bindAddr,
@@ -63,6 +64,7 @@ func New(svc *service.Service, bindAddr string, apiKey string, adminUsername str
 		adminPasswordHash: strings.TrimSpace(adminPasswordHash),
 		traffic:           traffic,
 		appVersion:        normalizeVersionString(appVersion),
+		codexVersion:      strings.TrimSpace(codexVersion),
 	}
 }
 
@@ -965,28 +967,28 @@ func (s *Server) handleOpenAIV1Root(w http.ResponseWriter, r *http.Request) {
 			respondErr(w, 400, "bad_request", "invalid JSON body")
 			return
 		}
-			if _, ok := anyBody["messages"]; ok {
-				r.Body = io.NopCloser(bytes.NewReader(body))
-				s.handleChatCompletions(w, r)
-				return
-			}
-			if _, ok := anyBody["input"]; ok {
-				r.Body = io.NopCloser(bytes.NewReader(body))
-				s.handleResponses(w, r)
-				return
-			}
-			if _, ok := anyBody["diff"]; ok {
-				r.Body = io.NopCloser(bytes.NewReader(body))
-				s.handleCodeReview(w, r)
-				return
-			}
-			if _, ok := anyBody["content"]; ok {
-				r.Body = io.NopCloser(bytes.NewReader(body))
-				s.handleCodeReview(w, r)
-				return
-			}
-			respondErr(w, 400, "bad_request", "unsupported /v1 payload, use /v1/chat/completions, /v1/responses, or /v1/code-review")
+		if _, ok := anyBody["messages"]; ok {
+			r.Body = io.NopCloser(bytes.NewReader(body))
+			s.handleChatCompletions(w, r)
 			return
+		}
+		if _, ok := anyBody["input"]; ok {
+			r.Body = io.NopCloser(bytes.NewReader(body))
+			s.handleResponses(w, r)
+			return
+		}
+		if _, ok := anyBody["diff"]; ok {
+			r.Body = io.NopCloser(bytes.NewReader(body))
+			s.handleCodeReview(w, r)
+			return
+		}
+		if _, ok := anyBody["content"]; ok {
+			r.Body = io.NopCloser(bytes.NewReader(body))
+			s.handleCodeReview(w, r)
+			return
+		}
+		respondErr(w, 400, "bad_request", "unsupported /v1 payload, use /v1/chat/completions, /v1/responses, or /v1/code-review")
+		return
 	default:
 		respondErr(w, 405, "method_not_allowed", "method not allowed")
 		return
@@ -1961,6 +1963,7 @@ func (s *Server) handleWebSettings(w http.ResponseWriter, r *http.Request) {
 			"usage_alert_threshold":       usageAlertThreshold,
 			"usage_auto_switch_threshold": usageAutoSwitchThreshold,
 			"app_version":                 updateInfo.CurrentVersion,
+			"codex_version":               firstNonEmpty(s.codexVersion, "unknown"),
 			"latest_version":              updateInfo.LatestVersion,
 			"release_url":                 updateInfo.ReleaseURL,
 			"latest_changelog":            updateInfo.LatestChangelog,
@@ -2311,21 +2314,21 @@ func (s *Server) withTrafficLog(protocol string, next http.HandlerFunc) http.Han
 		}
 		responseBody := strings.TrimSpace(string(rec.responseBody))
 		_ = s.traffic.Append(trafficlog.Entry{
-			Timestamp:    time.Now().UTC(),
-			Protocol:     protocol,
-			Method:       r.Method,
-			Path:         r.URL.Path,
-			Status:       rec.status,
-			LatencyMS:    time.Since(start).Milliseconds(),
-			RemoteAddr:   strings.TrimSpace(remote),
-			UserAgent:    strings.TrimSpace(r.UserAgent()),
-			AccountHint:  strings.TrimSpace(r.Header.Get("X-Codex-Account")),
-			AccountID:    strings.TrimSpace(rec.accountID),
-			AccountEmail: strings.TrimSpace(rec.accountEmail),
-			Model:        model,
-			Stream:       stream,
-			RequestBody:  strings.TrimSpace(string(bodyBytes)),
-			ResponseBody: responseBody,
+			Timestamp:         time.Now().UTC(),
+			Protocol:          protocol,
+			Method:            r.Method,
+			Path:              r.URL.Path,
+			Status:            rec.status,
+			LatencyMS:         time.Since(start).Milliseconds(),
+			RemoteAddr:        strings.TrimSpace(remote),
+			UserAgent:         strings.TrimSpace(r.UserAgent()),
+			AccountHint:       strings.TrimSpace(r.Header.Get("X-Codex-Account")),
+			AccountID:         strings.TrimSpace(rec.accountID),
+			AccountEmail:      strings.TrimSpace(rec.accountEmail),
+			Model:             model,
+			Stream:            stream,
+			RequestBody:       strings.TrimSpace(string(bodyBytes)),
+			ResponseBody:      responseBody,
 			RequestTruncated:  captureBody.Truncated(),
 			ResponseTruncated: rec.bodyTruncated,
 		})

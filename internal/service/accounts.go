@@ -39,11 +39,15 @@ type TokenSet struct {
 }
 
 func New(cfg config.Config, st *store.Store, cry *icrypto.Crypto) *Service {
+	bin := strings.TrimSpace(cfg.CodexBin)
+	if bin == "" {
+		bin = "codex"
+	}
 	return &Service{
 		Cfg:    cfg,
 		Store:  st,
 		Crypto: cry,
-		Codex:  provider.NewCodexExec("codex"),
+		Codex:  provider.NewCodexExec(bin),
 	}
 }
 
