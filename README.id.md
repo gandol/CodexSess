@@ -1,23 +1,58 @@
-# CodexSess
+# CodexSess Console
 
-[English](./README.md) | [Bahasa Indonesia](./README.id.md)
+<div align="center">
+  <img src="./codexsess.png" alt="Logo CodexSess" width="120" height="120">
 
-CodexSess adalah gateway manajemen akun berbasis web untuk penggunaan Codex/OpenAI.
-Project ini menyediakan API kompatibel OpenAI dan console manajemen bawaan dalam satu binary.
+  <h3>Control Plane Web-First untuk Operasi Akun Codex</h3>
+  <p>Kelola routing multi-akun API/CLI, otomasi berbasis usage, dan endpoint proxy kompatibel OpenAI dalam satu binary.</p>
 
-## Apa Itu CodexSess
+  <p>
+    <a href="https://github.com/rickicode/CodexSess/releases/latest">
+      <img src="https://img.shields.io/github/v/release/rickicode/CodexSess?style=flat-square" alt="Rilis Terbaru">
+    </a>
+    <img src="https://img.shields.io/badge/Backend-Go-00ADD8?style=flat-square" alt="Go">
+    <img src="https://img.shields.io/badge/Frontend-Svelte-FF3E00?style=flat-square" alt="Svelte">
+    <img src="https://img.shields.io/badge/Mode-Web--First-2f855a?style=flat-square" alt="Web First">
+    <img src="https://img.shields.io/badge/Platform-Linux%20%7C%20Windows-3b82f6?style=flat-square" alt="Platform">
+  </p>
 
-CodexSess dirancang sebagai lapisan antara client dan token akses Codex/OpenAI.
-Tujuannya agar kamu bisa mengelola banyak akun, menentukan akun aktif untuk API dan CLI, memantau usage, dan berpindah akun dengan cepat saat limit menipis.
+  <p>
+    <a href="./README.md">English</a> |
+    <a href="./README.id.md"><strong>Bahasa Indonesia</strong></a>
+  </p>
 
-## Tujuan Dibuatnya Proyek Ini
+  <p>
+    <a href="#ringkasan">Ringkasan</a> •
+    <a href="#fitur-utama">Fitur Utama</a> •
+    <a href="#pratinjau-ui">Pratinjau UI</a> •
+    <a href="#autentikasi--sesi">Autentikasi</a> •
+    <a href="#variabel-lingkungan">Environment</a> •
+    <a href="#instalasi-linux">Instalasi</a>
+  </p>
+</div>
 
-CodexSess dibuat untuk:
-- menyederhanakan manajemen multi-akun Codex dalam satu tempat
-- memisahkan pemilihan akun aktif untuk API dan Codex CLI
-- mengurangi downtime dengan perpindahan akun yang cepat
-- menyediakan web console yang praktis tanpa setup yang rumit
-- tetap berjalan dalam mode web di Linux/Windows dengan alur yang sama
+## Ringkasan
+
+CodexSess adalah gateway akun berbasis web untuk penggunaan Codex/OpenAI.
+
+Dirancang untuk operator yang membutuhkan:
+- perpindahan akun yang cepat
+- pemisahan akun aktif untuk API dan Codex CLI
+- otomasi berbasis usage (alert + auto switch)
+- surface API kompatibel OpenAI untuk penggunaan produksi
+
+Untuk penggunaan normal, unduh binary/package dari halaman rilis terbaru:
+- https://github.com/rickicode/CodexSess/releases/latest
+
+## Kenapa CodexSess Dibuat
+
+CodexSess dibuat untuk menyederhanakan operasi multi-akun Codex tanpa memecah tool.
+
+Daripada mengelola script terpisah, edit token manual, dan dashboard yang berbeda, CodexSess memusatkan:
+- kontrol akun API aktif
+- kontrol akun CLI aktif
+- visibilitas usage akun
+- keputusan fallback otomatis saat limit menipis
 
 ## Fitur Utama
 
@@ -25,34 +60,89 @@ CodexSess dibuat untuk:
   - `POST /v1/chat/completions` (termasuk SSE streaming)
   - `GET /v1/models`
   - `POST /v1/responses`
-- UI manajemen multi-akun
-- Logika perpindahan akun manual dan otomatis
-- Integrasi refresh/monitoring usage
-- Deployment satu binary dengan SPA tertanam
+- Pemisahan status akun aktif:
+  - akun API aktif
+  - akun CLI (Codex) aktif
+- Refresh usage dan otomasi:
+  - threshold alert
+  - perilaku auto-switch yang bisa dikonfigurasi
+- Web console + API proxy tertanam dalam satu binary
 
-## Otentikasi dan Sesi
+## Pratinjau UI
 
-- Login console manajemen menggunakan kredensial admin lokal
-- Kredensial default saat pertama kali dijalankan:
+<p align="center">
+  <img src="./screenshots/codexsess-dashboard.png" alt="CodexSess Dashboard" width="92%">
+</p>
+
+<p align="center">
+  <img src="./screenshots/codexsess-settings.png" alt="CodexSess Settings" width="92%">
+</p>
+
+<p align="center">
+  <img src="./screenshots/codexsess-apilogs.png" alt="CodexSess API Logs" width="92%">
+</p>
+
+<p align="center">
+  <img src="./screenshots/codexsess-about.png" alt="CodexSess About" width="92%">
+</p>
+
+## Autentikasi & Sesi
+
+- Console manajemen membutuhkan login.
+- Kredensial default saat first-run:
   - username: `admin`
   - password: `hijilabs`
-- Sesi login diingat 30 hari (cookie)
-- Password bisa diganti lewat CLI:
+- Durasi remember session: 30 hari.
+- Ganti password via CLI:
   - `--changepassword`
 
-## Cakupan Kompatibilitas API
+Route kompatibilitas API di `/v1/*` dan `/claude/v1/*` tetap route bergaya API key dan tidak diblok alur login web UI.
 
-- Route manajemen dilindungi login web
-- Route kompatibilitas API pada `/v1/*` dan `/claude/v1/*` tetap memakai gaya API key
+## Variabel Lingkungan
 
-## Cara Mendapatkan
+| Variabel | Default | Contoh | Deskripsi |
+|---|---|---|---|
+| `PORT` | `3061` | `PORT=8080` | Port HTTP server. Bind address: `127.0.0.1:<PORT>`. |
+| `CODEXSESS_NO_OPEN_BROWSER` | `false` | `CODEXSESS_NO_OPEN_BROWSER=true` | Menonaktifkan auto-open browser saat startup. Nilai truthy: `1`, `true`, `yes`. |
+| `CODEXSESS_CODEX_SANDBOX` | `workspace-write` | `CODEXSESS_CODEX_SANDBOX=read-only` | Mode sandbox yang diteruskan ke `codex exec`. |
+| `CODEXSESS_CLEAN_EXEC` | `true` | `CODEXSESS_CLEAN_EXEC=false` | Jalankan eksekusi Codex dalam mode isolasi (`true`) atau environment normal (`false`). |
 
-Untuk penggunaan normal, tidak perlu build manual.
-Gunakan binary terbaru dari GitHub Releases:
+Catatan:
+- Di Windows, direktori data default adalah `%APPDATA%\\codexsess` jika `APPDATA` tersedia.
+- `CODEX_HOME` diatur internal per akun aktif dan bukan switch runtime eksternal untuk CodexSess.
 
-- Rilis terbaru: https://github.com/rickicode/CodexSess/releases/latest
+## Instalasi (Linux)
 
-## Fokus Proyek
+Gunakan installer dari raw script repository:
 
-CodexSess berfokus pada keandalan operasional untuk penggunaan Codex berbasis akun:
-kontrol status aktif yang jelas, perpindahan berbasis usage, dan perilaku API yang konsisten.
+```bash
+curl -fsSL https://raw.githubusercontent.com/rickicode/CodexSess/main/scripts/install.sh | bash
+```
+
+Contoh mode:
+
+```bash
+# auto (default)
+curl -fsSL https://raw.githubusercontent.com/rickicode/CodexSess/main/scripts/install.sh | bash -s -- --mode auto
+
+# install package GUI (.deb/.rpm)
+curl -fsSL https://raw.githubusercontent.com/rickicode/CodexSess/main/scripts/install.sh | bash -s -- --mode gui
+
+# install server / cli
+curl -fsSL https://raw.githubusercontent.com/rickicode/CodexSess/main/scripts/install.sh | bash -s -- --mode server
+
+# update tipe instalasi yang sudah ada (auto-detect gui/server)
+curl -fsSL https://raw.githubusercontent.com/rickicode/CodexSess/main/scripts/install.sh | bash -s -- --mode update
+```
+
+Instalasi Windows:
+- Unduh file `.exe` langsung dari:
+  - https://github.com/rickicode/CodexSess/releases/latest
+
+## Cakupan Proyek
+
+Fokus CodexSess adalah keandalan operasional untuk penggunaan akun Codex:
+- pemilihan akun yang konsisten
+- visibilitas status aktif yang jelas
+- otomasi usage-aware dan fallback
+- surface integrasi kompatibel OpenAI
