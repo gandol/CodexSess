@@ -92,6 +92,9 @@ func run() error {
 
 	appURL := localAppURL(cfg.BindAddr)
 	log.Printf("codexsess bind address %s", strings.TrimSpace(cfg.BindAddr))
+	if bindIsPublic(cfg.BindAddr) {
+		log.Printf("codexsess public bind enabled (accessible via host IP/network): %s", strings.TrimSpace(cfg.BindAddr))
+	}
 	log.Printf("codexsess local console %s", appURL)
 	if shouldAutoOpenBrowser() {
 		go waitAndOpenBrowser(appURL)
@@ -136,6 +139,15 @@ func localAppURL(bindAddr string) string {
 		h = "127.0.0.1"
 	}
 	return fmt.Sprintf("http://%s:%s", h, port)
+}
+
+func bindIsPublic(bindAddr string) bool {
+	host, _, err := net.SplitHostPort(strings.TrimSpace(bindAddr))
+	if err != nil {
+		return false
+	}
+	h := strings.Trim(strings.TrimSpace(host), "[]")
+	return h == "0.0.0.0" || h == "::"
 }
 
 func waitAndOpenBrowser(appURL string) {

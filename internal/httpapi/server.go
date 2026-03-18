@@ -190,6 +190,93 @@ func ptrString(v string) *string {
 	return &v
 }
 
+func (s *Server) resolveAPIAccount(ctx context.Context, selector string) (store.Account, error) {
+	account, _, err := s.svc.ResolveForRequest(ctx, selector)
+	if err != nil {
+		return store.Account{}, err
+	}
+
+	usage, usageErr := s.loadOrRefreshUsage(ctx, account.ID)
+	if usageErr != nil {
+		// If usage check fails, keep current behavior and proceed with active account.
+		return account, nil
+	}
+	if usageAvailable(usage) {
+		return account, nil
+	}
+
+	// Explicit selector should stay strict and not auto-switch.
+	if strings.TrimSpace(selector) != "" {
+		return store.Account{}, fmt.Errorf("target account quota exhausted")
+	}
+
+	best, ok := s.findBestUsageAccount(ctx, account.ID)
+	if !ok {
+		return store.Account{}, fmt.Errorf("all API accounts are exhausted")
+	}
+	switched, err := s.svc.UseAccountAPI(ctx, best.ID)
+	if err != nil {
+		return store.Account{}, err
+	}
+	return switched, nil
+}
+
+func (s *Server) loadOrRefreshUsage(ctx context.Context, accountID string) (store.UsageSnapshot, error) {
+	usage, err := s.svc.Store.GetUsage(ctx, accountID)
+	if err == nil {
+		return usage, nil
+	}
+	return s.svc.RefreshUsage(ctx, accountID)
+}
+
+func usageAvailable(u store.UsageSnapshot) bool {
+	return u.HourlyPct > 0 && u.WeeklyPct > 0
+}
+
+func usageScore(u store.UsageSnapshot) int {
+	if u.HourlyPct < u.WeeklyPct {
+		return u.HourlyPct
+	}
+	return u.WeeklyPct
+}
+
+func (s *Server) findBestUsageAccount(ctx context.Context, skipID string) (store.Account, bool) {
+	accounts, err := s.svc.ListAccounts(ctx)
+	if err != nil || len(accounts) == 0 {
+		return store.Account{}, false
+	}
+
+	usageMap, _ := s.svc.Store.ListUsageSnapshots(ctx)
+	var best store.Account
+	bestScore := -1
+	found := false
+
+	for _, a := range accounts {
+		if strings.TrimSpace(a.ID) == "" || a.ID == skipID {
+			continue
+		}
+		u, ok := usageMap[a.ID]
+		if !ok || strings.TrimSpace(u.LastError) != "" {
+			refreshed, err := s.svc.RefreshUsage(ctx, a.ID)
+			if err != nil {
+				continue
+			}
+			u = refreshed
+		}
+		if !usageAvailable(u) {
+			continue
+		}
+		score := usageScore(u)
+		if score > bestScore {
+			best = a
+			bestScore = score
+			found = true
+		}
+	}
+
+	return best, found
+}
+
 type accessLogRecorder struct {
 	http.ResponseWriter
 	status int
@@ -932,25 +1019,20 @@ func (s *Server) handleCodeReview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	account, _, err := s.svc.ResolveForRequest(r.Context(), "")
+	account, err := s.resolveAPIAccount(r.Context(), "")
 	if err != nil {
-		respondErr(w, 404, "account_not_found", err.Error())
+		msg := strings.ToLower(strings.TrimSpace(err.Error()))
+		switch {
+		case strings.Contains(msg, "not found"):
+			respondErr(w, 404, "account_not_found", err.Error())
+		case strings.Contains(msg, "exhausted"):
+			respondErr(w, 429, "quota_exhausted", "target account quota exhausted")
+		default:
+			respondErr(w, 500, "internal_error", err.Error())
+		}
 		return
 	}
 	setResolvedAccountHeaders(w, account)
-	usage, usageErr := s.svc.Store.GetUsage(r.Context(), account.ID)
-	if usageErr != nil {
-		if snap, err := s.svc.RefreshUsage(r.Context(), account.ID); err == nil {
-			usage = snap
-			usageErr = nil
-		}
-	}
-	if usageErr == nil {
-		if usage.HourlyPct <= 0 || usage.WeeklyPct <= 0 {
-			respondErr(w, 429, "quota_exhausted", "target account quota exhausted")
-			return
-		}
-	}
 
 	status := 200
 	defer func() {
@@ -1055,25 +1137,20 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	}
 	req.Model = s.resolveMappedModel(req.Model)
 	prompt := promptFromMessagesWithTools(req.Messages, req.Tools, req.ToolChoice)
-	account, _, err := s.svc.ResolveForRequest(r.Context(), selector)
+	account, err := s.resolveAPIAccount(r.Context(), selector)
 	if err != nil {
-		respondErr(w, 404, "account_not_found", err.Error())
+		msg := strings.ToLower(strings.TrimSpace(err.Error()))
+		switch {
+		case strings.Contains(msg, "not found"):
+			respondErr(w, 404, "account_not_found", err.Error())
+		case strings.Contains(msg, "exhausted"):
+			respondErr(w, 429, "quota_exhausted", "target account quota exhausted")
+		default:
+			respondErr(w, 500, "internal_error", err.Error())
+		}
 		return
 	}
 	setResolvedAccountHeaders(w, account)
-	usage, usageErr := s.svc.Store.GetUsage(r.Context(), account.ID)
-	if usageErr != nil {
-		if snap, err := s.svc.RefreshUsage(r.Context(), account.ID); err == nil {
-			usage = snap
-			usageErr = nil
-		}
-	}
-	if usageErr == nil {
-		if usage.HourlyPct <= 0 || usage.WeeklyPct <= 0 {
-			respondErr(w, 429, "quota_exhausted", "target account quota exhausted")
-			return
-		}
-	}
 	status := 200
 	defer func() {
 		_ = s.svc.Store.InsertAudit(r.Context(), store.AuditRecord{
@@ -1188,25 +1265,20 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 		respondErr(w, 400, "bad_request", "input is required")
 		return
 	}
-	account, _, err := s.svc.ResolveForRequest(r.Context(), selector)
+	account, err := s.resolveAPIAccount(r.Context(), selector)
 	if err != nil {
-		respondErr(w, 404, "account_not_found", err.Error())
+		msg := strings.ToLower(strings.TrimSpace(err.Error()))
+		switch {
+		case strings.Contains(msg, "not found"):
+			respondErr(w, 404, "account_not_found", err.Error())
+		case strings.Contains(msg, "exhausted"):
+			respondErr(w, 429, "quota_exhausted", "target account quota exhausted")
+		default:
+			respondErr(w, 500, "internal_error", err.Error())
+		}
 		return
 	}
 	setResolvedAccountHeaders(w, account)
-	usage, usageErr := s.svc.Store.GetUsage(r.Context(), account.ID)
-	if usageErr != nil {
-		if snap, err := s.svc.RefreshUsage(r.Context(), account.ID); err == nil {
-			usage = snap
-			usageErr = nil
-		}
-	}
-	if usageErr == nil {
-		if usage.HourlyPct <= 0 || usage.WeeklyPct <= 0 {
-			respondErr(w, 429, "quota_exhausted", "target account quota exhausted")
-			return
-		}
-	}
 	status := 200
 	defer func() {
 		_ = s.svc.Store.InsertAudit(r.Context(), store.AuditRecord{
@@ -1351,25 +1423,20 @@ func (s *Server) handleClaudeMessages(w http.ResponseWriter, r *http.Request) {
 		respondErr(w, 400, "bad_request", "messages are required")
 		return
 	}
-	account, _, err := s.svc.ResolveForRequest(r.Context(), selector)
+	account, err := s.resolveAPIAccount(r.Context(), selector)
 	if err != nil {
-		respondErr(w, 404, "account_not_found", err.Error())
+		msg := strings.ToLower(strings.TrimSpace(err.Error()))
+		switch {
+		case strings.Contains(msg, "not found"):
+			respondErr(w, 404, "account_not_found", err.Error())
+		case strings.Contains(msg, "exhausted"):
+			respondErr(w, 429, "quota_exhausted", "target account quota exhausted")
+		default:
+			respondErr(w, 500, "internal_error", err.Error())
+		}
 		return
 	}
 	setResolvedAccountHeaders(w, account)
-	usage, usageErr := s.svc.Store.GetUsage(r.Context(), account.ID)
-	if usageErr != nil {
-		if snap, err := s.svc.RefreshUsage(r.Context(), account.ID); err == nil {
-			usage = snap
-			usageErr = nil
-		}
-	}
-	if usageErr == nil {
-		if usage.HourlyPct <= 0 || usage.WeeklyPct <= 0 {
-			respondErr(w, 429, "quota_exhausted", "target account quota exhausted")
-			return
-		}
-	}
 	status := 200
 	defer func() {
 		_ = s.svc.Store.InsertAudit(r.Context(), store.AuditRecord{
