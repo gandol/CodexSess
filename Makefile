@@ -7,6 +7,7 @@ EMBED_ASSETS_DIR ?= internal/webui/assets
 DEV_FRONTEND_PORT ?= 3051
 DEV_BACKEND_PORT ?= 3052
 RUN_PORT ?= 3061
+APP_VERSION ?= $(shell git describe --tags --exact-match 2>/dev/null || echo dev)
 
 build: build-frontend build-linux-assets build-backend
 
@@ -33,7 +34,7 @@ build-linux-assets:
 
 build-backend:
 	@echo "Building backend binary $(BINARY_PATH)..."
-	go build -o $(BINARY_PATH) .
+	go build -ldflags "-X main.appVersion=$(APP_VERSION)" -o $(BINARY_PATH) .
 
 build-windows: build-frontend
 	@echo "Building Windows binary with default icon..."
@@ -41,7 +42,7 @@ build-windows: build-frontend
 	@go run ./scripts/gen_default_icon.go build/windows/app.ico
 	@go run ./scripts/gen_default_icon.go build/windows/app.png
 	@go run github.com/akavel/rsrc@latest -ico build/windows/app.ico -o codexsess_windows_amd64.syso
-	GOOS=windows GOARCH=amd64 go build -o codexsess.exe .
+	GOOS=windows GOARCH=amd64 go build -ldflags "-X main.appVersion=$(APP_VERSION)" -o codexsess.exe .
 	@echo "Windows assets: codexsess.exe + build/windows/app.png"
 
 run: build

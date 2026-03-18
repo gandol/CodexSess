@@ -199,28 +199,30 @@ func (s *Server) resolveAPIAccount(ctx context.Context, selector string) (store.
 	}
 
 	usage, usageErr := s.loadOrRefreshUsage(ctx, account.ID)
-	if usageErr != nil {
-		// If usage check fails, keep current behavior and proceed with active account.
-		return account, nil
-	}
-	if usageAvailable(usage) {
-		return account, nil
+	if usageErr == nil && !usageAvailable(usage) {
+		// Explicit selector should stay strict and not auto-switch.
+		if strings.TrimSpace(selector) != "" {
+			return store.Account{}, fmt.Errorf("target account quota exhausted")
+		}
+
+		best, ok := s.findBestUsageAccount(ctx, account.ID)
+		if !ok {
+			return store.Account{}, fmt.Errorf("all API accounts are exhausted")
+		}
+		switched, err := s.svc.UseAccountAPI(ctx, best.ID)
+		if err != nil {
+			return store.Account{}, err
+		}
+		account = switched
 	}
 
-	// Explicit selector should stay strict and not auto-switch.
-	if strings.TrimSpace(selector) != "" {
-		return store.Account{}, fmt.Errorf("target account quota exhausted")
-	}
-
-	best, ok := s.findBestUsageAccount(ctx, account.ID)
-	if !ok {
-		return store.Account{}, fmt.Errorf("all API accounts are exhausted")
-	}
-	switched, err := s.svc.UseAccountAPI(ctx, best.ID)
+	// Ensure auth context always matches resolved API account before `codex exec`.
+	// API traffic must not mutate global CLI auth selection.
+	resolved, _, err := s.svc.ResolveForRequest(ctx, account.ID)
 	if err != nil {
 		return store.Account{}, err
 	}
-	return switched, nil
+	return resolved, nil
 }
 
 func (s *Server) loadOrRefreshUsage(ctx context.Context, accountID string) (store.UsageSnapshot, error) {
@@ -1058,7 +1060,7 @@ func (s *Server) handleCodeReview(w http.ResponseWriter, r *http.Request) {
 			respondErr(w, 500, "internal_error", "streaming not supported")
 			return
 		}
-		res, err := s.svc.Codex.StreamChat(r.Context(), account.CodexHome, req.Model, prompt, func(evt provider.ChatEvent) error {
+		res, err := s.svc.Codex.StreamChat(r.Context(), s.svc.APICodexHome(account.ID), req.Model, prompt, func(evt provider.ChatEvent) error {
 			chunk := map[string]any{
 				"id":      reqID,
 				"object":  "code.review.chunk",
@@ -1097,7 +1099,7 @@ func (s *Server) handleCodeReview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	res, err := s.svc.Codex.Chat(r.Context(), account.CodexHome, req.Model, prompt)
+	res, err := s.svc.Codex.Chat(r.Context(), s.svc.APICodexHome(account.ID), req.Model, prompt)
 	if err != nil {
 		status = 500
 		respondErr(w, 500, "upstream_error", err.Error())
@@ -1175,7 +1177,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 			respondErr(w, 500, "internal_error", "streaming not supported")
 			return
 		}
-		res, err := s.svc.Codex.StreamChat(r.Context(), account.CodexHome, req.Model, prompt, func(evt provider.ChatEvent) error {
+		res, err := s.svc.Codex.StreamChat(r.Context(), s.svc.APICodexHome(account.ID), req.Model, prompt, func(evt provider.ChatEvent) error {
 			chunk := ChatCompletionsChunk{
 				ID:      "chatcmpl-" + reqID,
 				Object:  "chat.completion.chunk",
@@ -1210,7 +1212,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	res, err := s.svc.Codex.Chat(r.Context(), account.CodexHome, req.Model, prompt)
+	res, err := s.svc.Codex.Chat(r.Context(), s.svc.APICodexHome(account.ID), req.Model, prompt)
 	if err != nil {
 		status = 500
 		respondErr(w, 500, "upstream_error", err.Error())
@@ -1315,7 +1317,7 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 		writeSSE(w, "response.created", createdEvent)
 		flusher.Flush()
 
-		result, err := s.svc.Codex.StreamChat(r.Context(), account.CodexHome, req.Model, inputText, func(evt provider.ChatEvent) error {
+		result, err := s.svc.Codex.StreamChat(r.Context(), s.svc.APICodexHome(account.ID), req.Model, inputText, func(evt provider.ChatEvent) error {
 			deltaEvent := map[string]any{
 				"type":        "response.output_text.delta",
 				"response_id": reqID,
@@ -1369,7 +1371,7 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := s.svc.Codex.Chat(r.Context(), account.CodexHome, req.Model, inputText)
+	result, err := s.svc.Codex.Chat(r.Context(), s.svc.APICodexHome(account.ID), req.Model, inputText)
 	if err != nil {
 		status = 500
 		respondErr(w, 500, "upstream_error", err.Error())
@@ -1471,7 +1473,7 @@ func (s *Server) handleClaudeMessages(w http.ResponseWriter, r *http.Request) {
 			},
 		})
 		flusher.Flush()
-		_, err := s.svc.Codex.StreamChat(r.Context(), account.CodexHome, req.Model, prompt, func(evt provider.ChatEvent) error {
+		_, err := s.svc.Codex.StreamChat(r.Context(), s.svc.APICodexHome(account.ID), req.Model, prompt, func(evt provider.ChatEvent) error {
 			writeSSE(w, "content_block_delta", map[string]any{
 				"type":  "content_block_delta",
 				"index": 0,
@@ -1493,7 +1495,7 @@ func (s *Server) handleClaudeMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	res, err := s.svc.Codex.Chat(r.Context(), account.CodexHome, req.Model, prompt)
+	res, err := s.svc.Codex.Chat(r.Context(), s.svc.APICodexHome(account.ID), req.Model, prompt)
 	if err != nil {
 		status = 500
 		respondErr(w, 500, "upstream_error", err.Error())

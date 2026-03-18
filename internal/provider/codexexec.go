@@ -2,10 +2,12 @@ package provider
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -52,15 +54,20 @@ func (c *CodexExec) Chat(ctx context.Context, codexHome string, model string, pr
 	if err := cmd.Start(); err != nil {
 		return ChatResult{}, err
 	}
-	defer stderr.Close()
+	stderrBuf, stderrDone := drainPipe(stderr)
 
 	var out ChatResult
+	var lastExecErr string
 	sc := bufio.NewScanner(stdout)
+	sc.Buffer(make([]byte, 0, 64*1024), 2*1024*1024)
 	for sc.Scan() {
 		line := sc.Bytes()
 		var evt map[string]any
 		if err := json.Unmarshal(line, &evt); err != nil {
 			continue
+		}
+		if msg := codexEventErrorMessage(evt); msg != "" {
+			lastExecErr = msg
 		}
 		t, _ := evt["type"].(string)
 		if t == "item.completed" {
@@ -78,17 +85,18 @@ func (c *CodexExec) Chat(ctx context.Context, codexHome string, model string, pr
 		}
 	}
 	if err := sc.Err(); err != nil {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		<-stderrDone
 		return ChatResult{}, err
 	}
 	if err := cmd.Wait(); err != nil {
-		errBytes := make([]byte, 8192)
-		n, _ := stderr.Read(errBytes)
-		msg := strings.TrimSpace(string(errBytes[:n]))
-		if msg == "" {
-			msg = err.Error()
-		}
+		<-stderrDone
+		stderrBytes := stderrBuf.Bytes()
+		msg := firstNonEmpty(strings.TrimSpace(lastExecErr), strings.TrimSpace(string(stderrBytes)), err.Error())
 		return ChatResult{}, fmt.Errorf("codex exec failed: %s", msg)
 	}
+	<-stderrDone
 	if strings.TrimSpace(out.Text) == "" {
 		return ChatResult{}, errors.New("empty response from codex")
 	}
@@ -113,15 +121,20 @@ func (c *CodexExec) StreamChat(ctx context.Context, codexHome string, model stri
 	if err := cmd.Start(); err != nil {
 		return ChatResult{}, err
 	}
-	defer stderr.Close()
+	stderrBuf, stderrDone := drainPipe(stderr)
 
 	var out ChatResult
+	var lastExecErr string
 	sc := bufio.NewScanner(stdout)
+	sc.Buffer(make([]byte, 0, 64*1024), 2*1024*1024)
 	for sc.Scan() {
 		line := sc.Bytes()
 		var evt map[string]any
 		if err := json.Unmarshal(line, &evt); err != nil {
 			continue
+		}
+		if msg := codexEventErrorMessage(evt); msg != "" {
+			lastExecErr = msg
 		}
 		t, _ := evt["type"].(string)
 		if t == "item.completed" {
@@ -130,6 +143,9 @@ func (c *CodexExec) StreamChat(ctx context.Context, codexHome string, model stri
 				if text, _ := item["text"].(string); text != "" {
 					out.Text = text
 					if err := onEvent(ChatEvent{Type: "delta", Text: text}); err != nil {
+						_ = cmd.Process.Kill()
+						_ = cmd.Wait()
+						<-stderrDone
 						return ChatResult{}, err
 					}
 				}
@@ -142,21 +158,64 @@ func (c *CodexExec) StreamChat(ctx context.Context, codexHome string, model stri
 		}
 	}
 	if err := sc.Err(); err != nil {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		<-stderrDone
 		return ChatResult{}, err
 	}
 	if err := cmd.Wait(); err != nil {
-		errBytes := make([]byte, 8192)
-		n, _ := stderr.Read(errBytes)
-		msg := strings.TrimSpace(string(errBytes[:n]))
-		if msg == "" {
-			msg = err.Error()
-		}
+		<-stderrDone
+		stderrBytes := stderrBuf.Bytes()
+		msg := firstNonEmpty(strings.TrimSpace(lastExecErr), strings.TrimSpace(string(stderrBytes)), err.Error())
 		return ChatResult{}, fmt.Errorf("codex exec failed: %s", msg)
 	}
+	<-stderrDone
 	if strings.TrimSpace(out.Text) == "" {
 		return ChatResult{}, errors.New("empty response from codex")
 	}
 	return out, nil
+}
+
+func drainPipe(rc io.ReadCloser) (*bytes.Buffer, <-chan struct{}) {
+	buf := &bytes.Buffer{}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		if rc == nil {
+			return
+		}
+		defer rc.Close()
+		_, _ = io.Copy(buf, io.LimitReader(rc, 512*1024))
+	}()
+	return buf, done
+}
+
+func codexEventErrorMessage(evt map[string]any) string {
+	if evt == nil {
+		return ""
+	}
+	if t, _ := evt["type"].(string); strings.TrimSpace(t) == "error" {
+		if msg, _ := evt["message"].(string); strings.TrimSpace(msg) != "" {
+			return strings.TrimSpace(msg)
+		}
+	}
+	if t, _ := evt["type"].(string); strings.TrimSpace(t) == "turn.failed" {
+		if errObj, _ := evt["error"].(map[string]any); errObj != nil {
+			if msg, _ := errObj["message"].(string); strings.TrimSpace(msg) != "" {
+				return strings.TrimSpace(msg)
+			}
+		}
+	}
+	return ""
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }
 
 func number(v any) float64 {

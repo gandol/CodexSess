@@ -344,6 +344,16 @@ func (s *Service) accountDir(id string) string {
 	return filepath.Join(s.Cfg.AuthStoreDir, id)
 }
 
+// APICodexHome returns isolated CODEX_HOME path for proxy API execution.
+// This prevents API traffic from mutating global CLI auth context.
+func (s *Service) APICodexHome(accountID string) string {
+	id := strings.TrimSpace(accountID)
+	if id == "" {
+		return strings.TrimSpace(s.Cfg.CodexHome)
+	}
+	return s.accountDir(id)
+}
+
 func (s *Service) syncAccountAuthToCodexHome(a store.Account) error {
 	src := filepath.Join(s.accountDir(a.ID), "auth.json")
 	b, err := os.ReadFile(src)

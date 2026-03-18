@@ -90,6 +90,32 @@ has_cmd() {
   command -v "$1" >/dev/null 2>&1
 }
 
+installer_user() {
+  if [[ "${EUID:-$(id -u)}" -eq 0 && -n "${SUDO_USER:-}" ]]; then
+    printf '%s' "${SUDO_USER}"
+    return
+  fi
+  id -un
+}
+
+installer_home() {
+  local user
+  user="$(installer_user)"
+  if [[ "${user}" == "root" ]]; then
+    printf '/root'
+    return
+  fi
+  if has_cmd getent; then
+    local home_dir
+    home_dir="$(getent passwd "${user}" | awk -F: '{print $6}')"
+    if [[ -n "${home_dir}" ]]; then
+      printf '%s' "${home_dir}"
+      return
+    fi
+  fi
+  printf '/home/%s' "${user}"
+}
+
 ensure_npm_installed() {
   if has_cmd npm; then
     return
@@ -242,6 +268,18 @@ resolve_tag() {
   echo "$tag"
 }
 
+download_release_asset() {
+  local tag="$1"
+  local asset="$2"
+  local out="$3"
+  local url
+  local ts
+  ts="$(date +%s)"
+  url="https://github.com/${REPO}/releases/download/${tag}/${asset}?ts=${ts}"
+  log "force-downloading ${asset} (cache-bypass) from release ${tag}"
+  curl -fL -H 'Cache-Control: no-cache' -H 'Pragma: no-cache' "${url}" -o "${out}"
+}
+
 install_binary_file() {
   local src="$1"
   local dst="$2"
@@ -264,8 +302,7 @@ install_gui_linux() {
 
   if has_cmd dpkg; then
     pkg="codexsess_GUI_${pkg_version}_${arch}.deb"
-    log "downloading ${pkg}"
-    curl -fL "https://github.com/${REPO}/releases/download/${tag}/${pkg}" -o "${tmp}/${pkg}"
+    download_release_asset "${tag}" "${pkg}" "${tmp}/${pkg}"
     run_root dpkg -i "${tmp}/${pkg}"
     ok "installed GUI package via dpkg: ${pkg}"
     return
@@ -279,8 +316,7 @@ install_gui_linux() {
       rpm_arch="aarch64"
     fi
     pkg="codexsess_GUI-${pkg_version}-1.${rpm_arch}.rpm"
-    log "downloading ${pkg}"
-    curl -fL "https://github.com/${REPO}/releases/download/${tag}/${pkg}" -o "${tmp}/${pkg}"
+    download_release_asset "${tag}" "${pkg}" "${tmp}/${pkg}"
     if has_cmd dnf; then
       run_root dnf install -y "${tmp}/${pkg}"
     elif has_cmd yum; then
@@ -307,8 +343,7 @@ install_server_binary_release() {
   asset="codexsess-linux-${arch}"
   outbin="${BIN_DIR%/}/codexsess"
 
-  log "downloading ${asset} from release ${tag}"
-  curl -fL "https://github.com/${REPO}/releases/download/${tag}/${asset}" -o "${tmp}/${asset}"
+  download_release_asset "${tag}" "${asset}" "${tmp}/${asset}"
 
   run_root mkdir -p "${BIN_DIR}"
   install_binary_file "${tmp}/${asset}" "${outbin}"
@@ -327,8 +362,11 @@ configure_server_systemd() {
     log "no root permission; skipping systemd service setup"
     return
   fi
-  local tmp unit_path
+  local tmp unit_path svc_user svc_home svc_group
   unit_path="/etc/systemd/system/codexsess.service"
+  svc_user="$(installer_user)"
+  svc_home="$(installer_home)"
+  svc_group="$(id -gn "${svc_user}" 2>/dev/null || printf '%s' "${svc_user}")"
   tmp="$(mktemp)"
   cat > "${tmp}" <<EOF
 [Unit]
@@ -338,9 +376,13 @@ Wants=network-online.target
 
 [Service]
 Type=simple
+User=${svc_user}
+Group=${svc_group}
 ExecStart=${outbin}
 Restart=always
 RestartSec=2
+Environment=HOME=${svc_home}
+Environment=CODEX_HOME=${svc_home}/.codex
 Environment=CODEXSESS_BIND_ADDR=0.0.0.0:3061
 Environment=CODEXSESS_NO_OPEN_BROWSER=1
 
@@ -354,9 +396,33 @@ EOF
   run_root systemctl restart codexsess.service
   if run_root systemctl is-active --quiet codexsess.service; then
     ok "systemd service active: codexsess.service"
+    ok "service user: ${svc_user} (home: ${svc_home})"
     ok "check status with: systemctl status codexsess"
   else
     err "systemd service is not active: codexsess.service"
+    log "check status with: systemctl status codexsess"
+    return 1
+  fi
+}
+
+finalize_service_restart() {
+  if ! has_cmd systemctl; then
+    return
+  fi
+  if ! service_exists_linux; then
+    return
+  fi
+  if [[ "${NO_SUDO}" == "1" && "${EUID:-$(id -u)}" -ne 0 ]]; then
+    err "cannot restart codexsess.service at installer end (no root permission)"
+    log "run manually: sudo systemctl restart codexsess && sudo systemctl status codexsess"
+    return
+  fi
+  log "finalizing install: restarting codexsess.service..."
+  run_root systemctl restart codexsess.service
+  if run_root systemctl is-active --quiet codexsess.service; then
+    ok "final restart done: codexsess.service is active"
+  else
+    err "final restart failed: codexsess.service is not active"
     log "check status with: systemctl status codexsess"
     return 1
   fi
@@ -434,6 +500,8 @@ main() {
       exit 1
       ;;
   esac
+
+  finalize_service_restart
 }
 
 main "$@"

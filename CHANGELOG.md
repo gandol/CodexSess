@@ -33,6 +33,12 @@ The format follows Keep a Changelog and uses semantic version tags (`vMAJOR.MINO
 - Added configurable Codex binary resolution (`codex_bin` in config / `CODEXSESS_CODEX_BIN` env), and runtime now resolves/stores absolute binary path for all Codex exec calls.
 - Startup Codex binary detection now includes explicit Windows fallback resolution (`codex.cmd` / `.exe` / `.bat`) and exposes detected Codex CLI version in web settings payload.
 - Sidebar header now displays `Codex CLI` version directly under `Codex Account Management`.
+- Installer now performs a final `systemctl restart codexsess.service` pass at the end of execution (including `--mode update`) whenever the service exists, with explicit status output.
+- Installer-generated systemd unit now runs as the installer user by default (`$SUDO_USER` or current user), and sets matching `HOME`/`CODEX_HOME` for consistent Codex account context.
+- Proxy API auth execution now uses isolated per-account `CODEX_HOME` under CodexSess storage, so API traffic no longer conflicts with `Use CLI` auth context.
+- API account resolution no longer synchronizes CLI active context implicitly; only explicit `Use CLI` updates CLI auth state.
+- Codex exec error reporting now prefers structured JSON error events (`error` / `turn.failed`) before falling back to `stderr`/exit code, reducing generic `exit status 1` responses.
+- Installer update/download flow now forces release asset re-download with cache-bypass headers/query, so update keeps fetching binary/package even when version tag is unchanged.
 
 ## [1.0.1] - 2026-03-18
 
