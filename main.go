@@ -91,7 +91,8 @@ func run() error {
 	defer stop()
 
 	appURL := localAppURL(cfg.BindAddr)
-	log.Printf("codexsess listening on %s", appURL)
+	log.Printf("codexsess bind address %s", strings.TrimSpace(cfg.BindAddr))
+	log.Printf("codexsess local console %s", appURL)
 	if shouldAutoOpenBrowser() {
 		go waitAndOpenBrowser(appURL)
 	}

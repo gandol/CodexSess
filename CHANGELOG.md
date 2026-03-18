@@ -23,6 +23,7 @@ The format follows Keep a Changelog and uses semantic version tags (`vMAJOR.MINO
 - Default bind address is now `0.0.0.0:<PORT>` (with `CODEXSESS_BIND_ADDR` override support), and server service unit sets `CODEXSESS_BIND_ADDR=0.0.0.0:3061`.
 - Installer terminal output now uses clearer colored status lines for info, success, and error messages.
 - README now documents `CODEXSESS_BIND_ADDR` and includes GUI-mode `~/.bashrc` bind override example for `0.0.0.0`.
+- Startup logging now prints actual bind address separately from local browser URL so public bind mode is explicit in runtime logs.
 
 ## [1.0.1] - 2026-03-18
 
