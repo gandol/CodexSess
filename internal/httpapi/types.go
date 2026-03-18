@@ -152,3 +152,22 @@ type ClaudeMessagesUsage struct {
 	InputTokens  int `json:"input_tokens"`
 	OutputTokens int `json:"output_tokens"`
 }
+
+type CodeReviewRequest struct {
+	Model        string   `json:"model"`
+	Diff         string   `json:"diff,omitempty"`
+	Content      string   `json:"content,omitempty"`
+	Language     string   `json:"language,omitempty"`
+	Focus        []string `json:"focus,omitempty"`
+	CustomPrompt string   `json:"custom_prompt,omitempty"`
+	Stream       bool     `json:"stream,omitempty"`
+}
+
+type CodeReviewResponse struct {
+	ID      string `json:"id"`
+	Object  string `json:"object"`
+	Created int64  `json:"created"`
+	Model   string `json:"model"`
+	Review  string `json:"review"`
+	Usage   Usage  `json:"usage"`
+}

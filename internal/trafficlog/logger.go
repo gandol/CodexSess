@@ -25,6 +25,8 @@ type Entry struct {
 	Stream       bool      `json:"stream,omitempty"`
 	RequestBody  string    `json:"request_body,omitempty"`
 	ResponseBody string    `json:"response_body,omitempty"`
+	RequestTruncated  bool `json:"request_truncated,omitempty"`
+	ResponseTruncated bool `json:"response_truncated,omitempty"`
 }
 
 type Logger struct {

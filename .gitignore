@@ -6,4 +6,5 @@ web/dist/
 .history
 build
 dist/
+build/dist/
 codexsess

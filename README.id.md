@@ -56,10 +56,12 @@ Daripada mengelola script terpisah, edit token manual, dan dashboard yang berbed
 
 ## Fitur Utama
 
-- Endpoint kompatibel OpenAI:
+- Endpoint proxy kompatibel OpenAI dan Claude:
   - `POST /v1/chat/completions` (termasuk SSE streaming)
   - `GET /v1/models`
   - `POST /v1/responses`
+  - `POST /v1/code-review` (endpoint khusus code review, `custom_prompt` opsional)
+  - `POST /claude/v1/messages`
 - Pemisahan status akun aktif:
   - akun API aktif
   - akun CLI (Codex) aktif
@@ -97,6 +99,7 @@ Daripada mengelola script terpisah, edit token manual, dan dashboard yang berbed
   - `--changepassword`
 
 Route kompatibilitas API di `/v1/*` dan `/claude/v1/*` tetap route bergaya API key dan tidak diblok alur login web UI.
+Artinya client OpenAI maupun client bergaya Claude sama-sama bisa diarahkan lewat CodexSess.
 
 ## Variabel Lingkungan
 

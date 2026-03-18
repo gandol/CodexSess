@@ -1,0 +1,332 @@
+name: CodexSess Code Review
+
+on:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+  issue_comment:
+    types:
+      - created
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.event.issue.number || github.run_id }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  codereview:
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'pull_request' && secrets.CODEXSESS_URL != '' && secrets.CODEXSESS_API_KEY != '' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Build PR diff
+        id: diff
+        run: |
+          set -euo pipefail
+          BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+          mkdir -p review_chunks review_out
+          git diff --name-status "${BASE_SHA}...${HEAD_SHA}" > review_out/files.txt || true
+          mapfile -t CHANGED_FILES < <(git diff --name-only "${BASE_SHA}...${HEAD_SHA}")
+          if [ "${#CHANGED_FILES[@]}" -eq 0 ]; then
+            echo "has_diff=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          idx=0
+          for file in "${CHANGED_FILES[@]}"; do
+            [ -n "$file" ] || continue
+            git diff --unified=3 "${BASE_SHA}...${HEAD_SHA}" -- "$file" > "review_chunks/${idx}.diff" || true
+            if [ -s "review_chunks/${idx}.diff" ]; then
+              echo "${idx}|${file}" >> review_out/chunks.index
+              idx=$((idx+1))
+            else
+              rm -f "review_chunks/${idx}.diff"
+            fi
+          done
+          if [ ! -f review_out/chunks.index ]; then
+            echo "has_diff=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "chunk_count=${idx}" >> "$GITHUB_OUTPUT"
+          echo "has_diff=true" >> "$GITHUB_OUTPUT"
+
+      - name: Review chunks via CodexSess
+        if: steps.diff.outputs.has_diff == 'true'
+        env:
+          CODEXSESS_URL: ${{ secrets.CODEXSESS_URL }}
+          CODEXSESS_API_KEY: ${{ secrets.CODEXSESS_API_KEY }}
+        run: |
+          set -euo pipefail
+          : > review_out/chunk_reviews.md
+          while IFS='|' read -r idx file; do
+            [ -f "review_chunks/${idx}.diff" ] || continue
+            BODY=$(jq -n \
+              --rawfile diff "review_chunks/${idx}.diff" \
+              --arg title "${{ github.event.pull_request.title }}" \
+              --arg file "$file" \
+              '{
+                model: "gpt-5.2-codex",
+                language: "mixed",
+                focus: ["bugs","security","regression","test_coverage"],
+                diff: $diff,
+                custom_prompt: ("You are reviewing one file chunk from a PR. PR title: " + $title + ". File: " + $file + ". Return concrete findings with severity and file/line references when possible. If no issues, state no critical findings for this file."),
+                stream: false
+              }')
+            curl -fsSL \
+              --retry 3 \
+              --retry-delay 2 \
+              --retry-all-errors \
+              --connect-timeout 10 \
+              --max-time 240 \
+              "${CODEXSESS_URL%/}/v1/code-review" \
+              -H "Authorization: Bearer ${CODEXSESS_API_KEY}" \
+              -H "Content-Type: application/json" \
+              -d "$BODY" > "review_out/chunk_${idx}.json"
+
+            {
+              echo "### File: ${file}"
+              jq -r '.review // "No review output returned."' "review_out/chunk_${idx}.json"
+              echo
+            } >> review_out/chunk_reviews.md
+          done < review_out/chunks.index
+
+      - name: Synthesize final review
+        if: steps.diff.outputs.has_diff == 'true'
+        env:
+          CODEXSESS_URL: ${{ secrets.CODEXSESS_URL }}
+          CODEXSESS_API_KEY: ${{ secrets.CODEXSESS_API_KEY }}
+        run: |
+          set -euo pipefail
+          BODY=$(jq -n \
+            --rawfile files review_out/files.txt \
+            --rawfile chunk_reviews review_out/chunk_reviews.md \
+            --arg title "${{ github.event.pull_request.title }}" \
+            '{
+              model: "gpt-5.2-codex",
+              language: "mixed",
+              focus: ["bugs","security","regression","test_coverage"],
+              content: ("PR title: " + $title + "\n\nChanged files:\n" + $files + "\n\nPer-file reviewer outputs:\n" + $chunk_reviews),
+              custom_prompt: "Synthesize these chunk reviews into one final PR review. Deduplicate findings. Output ordered by severity (critical/high/medium/low). Include: summary, findings with impact + suggested fix, patch-ready snippet when confidence is high, and testing gaps.",
+              stream: false
+            }')
+          curl -fsSL \
+            --retry 3 \
+            --retry-delay 2 \
+            --retry-all-errors \
+            --connect-timeout 10 \
+            --max-time 240 \
+            "${CODEXSESS_URL%/}/v1/code-review" \
+            -H "Authorization: Bearer ${CODEXSESS_API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d "$BODY" > review_out/final.json
+          jq -r '.review // "No review output returned."' review_out/final.json > review.txt
+
+      - name: Upsert PR comment
+        if: steps.diff.outputs.has_diff == 'true'
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const fs = require('fs');
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const issue_number = context.payload.pull_request.number;
+            const marker = '<!-- codexsess-code-review -->';
+            let review = 'No review output returned.';
+            try {
+              review = fs.readFileSync('review.txt', 'utf8').trim() || review;
+            } catch (_) {}
+            const maxLen = 60000;
+            if (review.length > maxLen) {
+              review = review.slice(0, maxLen) + '\n\n... (truncated by GitHub Action)';
+            }
+            const body = `${marker}
+            ## CodexSess Automated Code Review
+
+            ${review}`;
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner,
+              repo,
+              issue_number,
+              per_page: 100
+            });
+            const existing = comments.find(c =>
+              c.user?.type === 'Bot' &&
+              typeof c.body === 'string' &&
+              c.body.includes(marker)
+            );
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: existing.id,
+                body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number,
+                body
+              });
+            }
+
+      - name: Skip note (no diff)
+        if: steps.diff.outputs.has_diff != 'true'
+        run: echo "No diff found. Skipping CodexSess review."
+
+  autofix:
+    if: >
+      github.event_name == 'issue_comment' &&
+      github.event.issue.pull_request != null &&
+      startsWith(github.event.comment.body, '/codexsess-autofix') &&
+      (
+        github.event.comment.author_association == 'OWNER' ||
+        github.event.comment.author_association == 'MEMBER' ||
+        github.event.comment.author_association == 'COLLABORATOR'
+      ) &&
+      secrets.CODEXSESS_URL != '' &&
+      secrets.CODEXSESS_API_KEY != ''
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve PR metadata
+        id: pr
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const pull_number = context.payload.issue.number;
+            const { data: pr } = await github.rest.pulls.get({ owner, repo, pull_number });
+            core.setOutput('number', String(pr.number));
+            core.setOutput('head_ref', pr.head.ref);
+            core.setOutput('head_repo', pr.head.repo.full_name);
+            core.setOutput('base_sha', pr.base.sha);
+            core.setOutput('head_sha', pr.head.sha);
+            core.setOutput('is_same_repo', pr.head.repo.full_name === `${owner}/${repo}` ? 'true' : 'false');
+
+      - name: Checkout PR head
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ steps.pr.outputs.head_repo }}
+          ref: ${{ steps.pr.outputs.head_ref }}
+          fetch-depth: 0
+
+      - name: Build PR diff
+        id: diff
+        run: |
+          set -euo pipefail
+          BASE_SHA="${{ steps.pr.outputs.base_sha }}"
+          HEAD_SHA="${{ steps.pr.outputs.head_sha }}"
+          git diff --unified=3 "${BASE_SHA}...${HEAD_SHA}" > pr.diff
+          if [ ! -s pr.diff ]; then
+            echo "has_diff=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "has_diff=true" >> "$GITHUB_OUTPUT"
+
+      - name: Request autofix patch from CodexSess
+        if: steps.diff.outputs.has_diff == 'true'
+        env:
+          CODEXSESS_URL: ${{ secrets.CODEXSESS_URL }}
+          CODEXSESS_API_KEY: ${{ secrets.CODEXSESS_API_KEY }}
+        run: |
+          set -euo pipefail
+          BODY=$(jq -n \
+            --rawfile diff pr.diff \
+            --arg title "${{ github.event.issue.title }}" \
+            '{
+              model: "gpt-5.2-codex",
+              language: "mixed",
+              focus: ["bugs","regression","correctness"],
+              diff: $diff,
+              custom_prompt: ("Generate an autofix patch for this PR. Title: " + $title + ". Output MUST be a single valid unified diff only, starting with diff --git. No prose, no markdown fences, no explanations. Keep changes minimal and safe."),
+              stream: false
+            }')
+          curl -fsSL \
+            --retry 3 \
+            --retry-delay 2 \
+            --retry-all-errors \
+            --connect-timeout 10 \
+            --max-time 240 \
+            "${CODEXSESS_URL%/}/v1/code-review" \
+            -H "Authorization: Bearer ${CODEXSESS_API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d "$BODY" > review.json
+          jq -r '.review // ""' review.json > review_raw.txt
+          awk 'BEGIN{capture=0} /^diff --git /{capture=1} capture{print}' review_raw.txt > autofix.patch
+
+      - name: Validate patch
+        if: steps.diff.outputs.has_diff == 'true'
+        id: validate
+        run: |
+          set -euo pipefail
+          if [ ! -s autofix.patch ]; then
+            echo "valid=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if git apply --check autofix.patch; then
+            echo "valid=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "valid=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Prepare patch preview
+        if: steps.diff.outputs.has_diff == 'true' && steps.validate.outputs.valid == 'true'
+        id: preview
+        run: |
+          set -euo pipefail
+          MAX=45000
+          SIZE=$(wc -c < autofix.patch || echo 0)
+          if [ "$SIZE" -gt "$MAX" ]; then
+            head -c "$MAX" autofix.patch > autofix.preview.patch
+            echo "\n# ... patch preview truncated ..." >> autofix.preview.patch
+          else
+            cp autofix.patch autofix.preview.patch
+          fi
+
+      - name: Upload patch artifact
+        if: steps.diff.outputs.has_diff == 'true' && steps.validate.outputs.valid == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: codexsess-autofix-patch-pr-${{ steps.pr.outputs.number }}
+          path: autofix.patch
+
+      - name: Report result
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const fs = require('fs');
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const issue_number = context.payload.issue.number;
+            const hasDiff = '${{ steps.diff.outputs.has_diff || 'false' }}' === 'true';
+            const valid = '${{ steps.validate.outputs.valid || 'false' }}' === 'true';
+            let body = '';
+            if (!hasDiff) {
+              body = 'Autofix skipped: no diff detected for this PR.';
+            } else if (!valid) {
+              body = 'Autofix suggestion failed: generated patch was empty or invalid. Review manually is required.';
+            } else {
+              let patchPreview = '';
+              try {
+                patchPreview = fs.readFileSync('autofix.preview.patch', 'utf8').trim();
+              } catch (_) {}
+              const header = 'Autofix suggestion generated. No code was pushed or merged automatically.\nReview and apply manually if accepted.';
+              if (patchPreview) {
+                body = `${header}\n\n\`\`\`diff\n${patchPreview}\n\`\`\``;
+              } else {
+                body = header + '\n\nPatch file is attached as workflow artifact.';
+              }
+            }
+            await github.rest.issues.createComment({ owner, repo, issue_number, body });

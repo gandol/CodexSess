@@ -4,6 +4,7 @@
     apiKey,
     openAIEndpoint,
     claudeEndpoint,
+    codeReviewEndpoint,
     availableModels,
     modelMappings,
     mappingAlias,
@@ -42,7 +43,8 @@
     backgroundRefreshLastAt,
     onRegenerateAPIKey,
     openAIExample,
-    claudeExample
+    claudeExample,
+    codeReviewExample
   } = $props();
 
   function formatBackgroundRefreshTime(timestamp) {
@@ -232,6 +234,16 @@
           </button>
         </div>
       </div>
+
+      <div class="setting-row">
+        <label for="codeReviewEndpoint">Code Review Endpoint</label>
+        <div class="setting-actions-grid">
+          <input id="codeReviewEndpoint" value={codeReviewEndpoint} readonly disabled />
+          <button class="btn btn-secondary" onclick={() => onCopyText(codeReviewEndpoint, 'Code review endpoint', 'code_review_endpoint')} disabled={busy}>
+            {#if isCopied('code_review_endpoint')}Copied{:else}Copy{/if}
+          </button>
+        </div>
+      </div>
     </section>
 
     <section class="setting-category">
@@ -307,6 +319,16 @@
           <pre>{claudeExample()}</pre>
           <button class="btn btn-secondary" onclick={() => onCopyText(claudeExample(), 'Claude example', 'claude_example')}>
             {#if isCopied('claude_example')}Copied{:else}Copy Example{/if}
+          </button>
+        </div>
+      </div>
+
+      <div class="setting-row">
+        <p class="setting-title">Code Review Request Example</p>
+        <div class="code-box">
+          <pre>{codeReviewExample()}</pre>
+          <button class="btn btn-secondary" onclick={() => onCopyText(codeReviewExample(), 'Code review example', 'code_review_example')}>
+            {#if isCopied('code_review_example')}Copied{:else}Copy Example{/if}
           </button>
         </div>
       </div>

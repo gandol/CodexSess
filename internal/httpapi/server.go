@@ -48,6 +48,12 @@ type Server struct {
 	mu                    sync.RWMutex
 }
 
+const (
+	maxTrafficRequestCaptureBytes  = 8 * 1024 * 1024
+	maxTrafficResponseCaptureBytes = 8 * 1024 * 1024
+	maxCodeReviewInputChars        = 400_000
+)
+
 func New(svc *service.Service, bindAddr string, apiKey string, adminUsername string, adminPasswordHash string, traffic *trafficlog.Logger, appVersion string) *Server {
 	return &Server{
 		svc:               svc,
@@ -77,6 +83,7 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	mux.HandleFunc("/api/auth/browser/start", s.handleWebBrowserStart)
 	mux.HandleFunc("/api/auth/browser/cancel", s.handleWebBrowserCancel)
 	mux.HandleFunc("/api/auth/browser/callback", s.handleWebBrowserCallback)
+	mux.HandleFunc("/api/auth/browser/complete", s.handleWebBrowserComplete)
 	mux.HandleFunc("/api/auth/login", s.handleAPIAuthLogin)
 	mux.HandleFunc("/auth/callback", s.handleWebBrowserCallback)
 	mux.HandleFunc("/auth/login", s.handleWebAuthLogin)
@@ -91,6 +98,7 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	mux.HandleFunc("/v1", s.withTrafficLog("openai", s.handleOpenAIV1Root))
 	mux.HandleFunc("/v1/chat/completions", s.withTrafficLog("openai", s.handleChatCompletions))
 	mux.HandleFunc("/v1/responses", s.withTrafficLog("openai", s.handleResponses))
+	mux.HandleFunc("/v1/code-review", s.withTrafficLog("openai", s.handleCodeReview))
 	mux.HandleFunc("/v1/messages", s.withTrafficLog("claude", s.handleClaudeMessages))
 	mux.HandleFunc("/claude/v1/messages", s.withTrafficLog("claude", s.handleClaudeMessages))
 	mux.Handle("/", webui.Handler())
@@ -870,22 +878,159 @@ func (s *Server) handleOpenAIV1Root(w http.ResponseWriter, r *http.Request) {
 			respondErr(w, 400, "bad_request", "invalid JSON body")
 			return
 		}
-		if _, ok := anyBody["messages"]; ok {
-			r.Body = io.NopCloser(bytes.NewReader(body))
-			s.handleChatCompletions(w, r)
+			if _, ok := anyBody["messages"]; ok {
+				r.Body = io.NopCloser(bytes.NewReader(body))
+				s.handleChatCompletions(w, r)
+				return
+			}
+			if _, ok := anyBody["input"]; ok {
+				r.Body = io.NopCloser(bytes.NewReader(body))
+				s.handleResponses(w, r)
+				return
+			}
+			if _, ok := anyBody["diff"]; ok {
+				r.Body = io.NopCloser(bytes.NewReader(body))
+				s.handleCodeReview(w, r)
+				return
+			}
+			if _, ok := anyBody["content"]; ok {
+				r.Body = io.NopCloser(bytes.NewReader(body))
+				s.handleCodeReview(w, r)
+				return
+			}
+			respondErr(w, 400, "bad_request", "unsupported /v1 payload, use /v1/chat/completions, /v1/responses, or /v1/code-review")
 			return
-		}
-		if _, ok := anyBody["input"]; ok {
-			r.Body = io.NopCloser(bytes.NewReader(body))
-			s.handleResponses(w, r)
-			return
-		}
-		respondErr(w, 400, "bad_request", "unsupported /v1 payload, use /v1/chat/completions or /v1/responses")
-		return
 	default:
 		respondErr(w, 405, "method_not_allowed", "method not allowed")
 		return
 	}
+}
+
+func (s *Server) handleCodeReview(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
+	reqID := "review_" + strings.ReplaceAll(uuid.NewString(), "-", "")
+	if r.Method != http.MethodPost {
+		respondErr(w, 405, "method_not_allowed", "method not allowed")
+		return
+	}
+	if !s.isValidAPIKey(r) {
+		respondErr(w, 401, "unauthorized", "invalid API key")
+		return
+	}
+	var req CodeReviewRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondErr(w, 400, "bad_request", "invalid JSON body")
+		return
+	}
+	if strings.TrimSpace(req.Model) == "" {
+		req.Model = "gpt-5.2-codex"
+	}
+	req.Model = s.resolveMappedModel(req.Model)
+	prompt, err := buildCodeReviewPrompt(req)
+	if err != nil {
+		respondErr(w, 400, "bad_request", err.Error())
+		return
+	}
+
+	account, _, err := s.svc.ResolveForRequest(r.Context(), "")
+	if err != nil {
+		respondErr(w, 404, "account_not_found", err.Error())
+		return
+	}
+	setResolvedAccountHeaders(w, account)
+	usage, usageErr := s.svc.Store.GetUsage(r.Context(), account.ID)
+	if usageErr != nil {
+		if snap, err := s.svc.RefreshUsage(r.Context(), account.ID); err == nil {
+			usage = snap
+			usageErr = nil
+		}
+	}
+	if usageErr == nil {
+		if usage.HourlyPct <= 0 || usage.WeeklyPct <= 0 {
+			respondErr(w, 429, "quota_exhausted", "target account quota exhausted")
+			return
+		}
+	}
+
+	status := 200
+	defer func() {
+		_ = s.svc.Store.InsertAudit(r.Context(), store.AuditRecord{
+			RequestID: reqID,
+			AccountID: account.ID,
+			Model:     req.Model,
+			Stream:    req.Stream,
+			Status:    status,
+			LatencyMS: time.Since(start).Milliseconds(),
+			CreatedAt: time.Now().UTC(),
+		})
+	}()
+
+	if req.Stream {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			status = 500
+			respondErr(w, 500, "internal_error", "streaming not supported")
+			return
+		}
+		res, err := s.svc.Codex.StreamChat(r.Context(), account.CodexHome, req.Model, prompt, func(evt provider.ChatEvent) error {
+			chunk := map[string]any{
+				"id":      reqID,
+				"object":  "code.review.chunk",
+				"created": time.Now().Unix(),
+				"model":   req.Model,
+				"delta":   evt.Text,
+			}
+			b, _ := json.Marshal(chunk)
+			_, _ = fmt.Fprintf(w, "data: %s\n\n", b)
+			flusher.Flush()
+			return nil
+		})
+		if err != nil {
+			status = 500
+			_, _ = fmt.Fprintf(w, "data: %s\n\n", `{"error":{"message":"`+escape(err.Error())+`"}}`)
+			_, _ = fmt.Fprintf(w, "data: [DONE]\n\n")
+			flusher.Flush()
+			return
+		}
+		final := map[string]any{
+			"id":      reqID,
+			"object":  "code.review",
+			"created": time.Now().Unix(),
+			"model":   req.Model,
+			"usage": map[string]any{
+				"prompt_tokens":     res.InputTokens,
+				"completion_tokens": res.OutputTokens,
+				"total_tokens":      res.InputTokens + res.OutputTokens,
+			},
+			"done": true,
+		}
+		b, _ := json.Marshal(final)
+		_, _ = fmt.Fprintf(w, "data: %s\n\n", b)
+		_, _ = fmt.Fprintf(w, "data: [DONE]\n\n")
+		flusher.Flush()
+		return
+	}
+
+	res, err := s.svc.Codex.Chat(r.Context(), account.CodexHome, req.Model, prompt)
+	if err != nil {
+		status = 500
+		respondErr(w, 500, "upstream_error", err.Error())
+		return
+	}
+	respondJSON(w, 200, CodeReviewResponse{
+		ID:      reqID,
+		Object:  "code.review",
+		Created: time.Now().Unix(),
+		Model:   req.Model,
+		Review:  res.Text,
+		Usage: Usage{
+			PromptTokens:     res.InputTokens,
+			CompletionTokens: res.OutputTokens,
+			TotalTokens:      res.InputTokens + res.OutputTokens,
+		},
+	})
 }
 
 func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
@@ -976,7 +1121,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 			Object:  "chat.completion.chunk",
 			Created: time.Now().Unix(),
 			Model:   req.Model,
-			Choices: []ChatChunkChoice{{Index: 0, Delta: ChatMessage{}, FinishReason: ptrString("stop")}},
+			Choices: []ChatChunkChoice{{Index: 0, Delta: ChatMessage{Role: "assistant"}, FinishReason: ptrString("stop")}},
 			Usage:   &Usage{PromptTokens: res.InputTokens, CompletionTokens: res.OutputTokens, TotalTokens: res.InputTokens + res.OutputTokens},
 		}
 		b, _ := json.Marshal(final)
@@ -1377,6 +1522,62 @@ func promptFromClaudeMessages(msgs []ClaudeMessage) string {
 	return strings.TrimSpace(sb.String())
 }
 
+func buildCodeReviewPrompt(req CodeReviewRequest) (string, error) {
+	diff := strings.TrimSpace(req.Diff)
+	content := strings.TrimSpace(req.Content)
+	if diff == "" && content == "" {
+		return "", fmt.Errorf("diff or content is required")
+	}
+	if len(diff) > maxCodeReviewInputChars {
+		return "", fmt.Errorf("diff is too large (max %d chars)", maxCodeReviewInputChars)
+	}
+	if len(content) > maxCodeReviewInputChars {
+		return "", fmt.Errorf("content is too large (max %d chars)", maxCodeReviewInputChars)
+	}
+	if len(diff)+len(content) > maxCodeReviewInputChars {
+		return "", fmt.Errorf("combined review input is too large (max %d chars)", maxCodeReviewInputChars)
+	}
+	var sb strings.Builder
+	sb.WriteString("You are a strict senior code reviewer.\n")
+	sb.WriteString("Rules:\n")
+	sb.WriteString("- Prioritize bugs, regressions, security issues, and missing edge-case handling.\n")
+	sb.WriteString("- Findings first, ordered by severity.\n")
+	sb.WriteString("- For each finding include: severity, impact, and concrete fix suggestion.\n")
+	sb.WriteString("- If no issues found, say: no critical findings, then list residual risks.\n")
+	sb.WriteString("- Keep output concise and technical.\n")
+	if lang := strings.TrimSpace(req.Language); lang != "" {
+		sb.WriteString("\nLanguage: ")
+		sb.WriteString(lang)
+		sb.WriteString("\n")
+	}
+	if len(req.Focus) > 0 {
+		sb.WriteString("Focus Areas: ")
+		for i, f := range req.Focus {
+			if i > 0 {
+				sb.WriteString(", ")
+			}
+			sb.WriteString(strings.TrimSpace(f))
+		}
+		sb.WriteString("\n")
+	}
+	if diff != "" {
+		sb.WriteString("\nDIFF INPUT:\n")
+		sb.WriteString(diff)
+		sb.WriteString("\n")
+	}
+	if content != "" {
+		sb.WriteString("\nCONTENT INPUT:\n")
+		sb.WriteString(content)
+		sb.WriteString("\n")
+	}
+	if custom := strings.TrimSpace(req.CustomPrompt); custom != "" {
+		sb.WriteString("\nAdditional Reviewer Instruction:\n")
+		sb.WriteString(custom)
+		sb.WriteString("\n")
+	}
+	return strings.TrimSpace(sb.String()), nil
+}
+
 func extractClaudeContentText(raw json.RawMessage) string {
 	if len(raw) == 0 {
 		return ""
@@ -1684,6 +1885,7 @@ func (s *Server) handleWebSettings(w http.ResponseWriter, r *http.Request) {
 			"api_key":                     s.currentAPIKey(),
 			"openai_endpoint":             strings.TrimRight(base, "/") + "/v1/chat/completions",
 			"claude_endpoint":             strings.TrimRight(base, "/") + "/v1/messages",
+			"code_review_endpoint":        strings.TrimRight(base, "/") + "/v1/code-review",
 			"openai_models_url":           strings.TrimRight(base, "/") + "/v1/models",
 			"openai_chat_url":             strings.TrimRight(base, "/") + "/v1/chat/completions",
 			"openai_responses_url":        strings.TrimRight(base, "/") + "/v1/responses",
@@ -2017,20 +2219,24 @@ func (s *Server) withTrafficLog(protocol string, next http.HandlerFunc) http.Han
 			next(w, r)
 			return
 		}
-		var bodyBytes []byte
-		if r.Body != nil {
-			bodyBytes, _ = io.ReadAll(r.Body)
-			_ = r.Body.Close()
-			r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+		captureBody := &limitedCaptureReadCloser{
+			rc:    r.Body,
+			limit: maxTrafficRequestCaptureBytes,
 		}
+		r.Body = captureBody
 		start := time.Now()
 		rec := &trafficRecorder{
 			ResponseWriter:    w,
 			status:            http.StatusOK,
-			responseBodyLimit: -1,
+			responseBodyLimit: maxTrafficResponseCaptureBytes,
 		}
 		next(rec, r)
+		if r.Body != nil {
+			_, _ = io.Copy(io.Discard, r.Body)
+			_ = r.Body.Close()
+		}
 
+		bodyBytes := captureBody.Captured()
 		model, stream := detectTrafficModelAndStream(r.URL.Path, bodyBytes)
 		remote := r.RemoteAddr
 		if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
@@ -2053,8 +2259,63 @@ func (s *Server) withTrafficLog(protocol string, next http.HandlerFunc) http.Han
 			Stream:       stream,
 			RequestBody:  strings.TrimSpace(string(bodyBytes)),
 			ResponseBody: responseBody,
+			RequestTruncated:  captureBody.Truncated(),
+			ResponseTruncated: rec.bodyTruncated,
 		})
 	}
+}
+
+type limitedCaptureReadCloser struct {
+	rc        io.ReadCloser
+	buf       bytes.Buffer
+	limit     int
+	truncated bool
+}
+
+func (l *limitedCaptureReadCloser) Read(p []byte) (int, error) {
+	if l.rc == nil {
+		return 0, io.EOF
+	}
+	n, err := l.rc.Read(p)
+	if n > 0 {
+		l.capture(p[:n])
+	}
+	return n, err
+}
+
+func (l *limitedCaptureReadCloser) Close() error {
+	if l.rc == nil {
+		return nil
+	}
+	return l.rc.Close()
+}
+
+func (l *limitedCaptureReadCloser) capture(p []byte) {
+	if l.limit <= 0 || l.truncated || len(p) == 0 {
+		if l.limit <= 0 {
+			l.truncated = true
+		}
+		return
+	}
+	remaining := l.limit - l.buf.Len()
+	if remaining <= 0 {
+		l.truncated = true
+		return
+	}
+	if len(p) > remaining {
+		_, _ = l.buf.Write(p[:remaining])
+		l.truncated = true
+		return
+	}
+	_, _ = l.buf.Write(p)
+}
+
+func (l *limitedCaptureReadCloser) Captured() []byte {
+	return l.buf.Bytes()
+}
+
+func (l *limitedCaptureReadCloser) Truncated() bool {
+	return l.truncated
 }
 
 type trafficRecorder struct {
@@ -2102,6 +2363,13 @@ func (r *trafficRecorder) Flush() {
 
 func detectTrafficModelAndStream(path string, body []byte) (string, bool) {
 	switch strings.TrimSpace(path) {
+	case "/v1":
+		var anyBody map[string]any
+		if err := json.Unmarshal(body, &anyBody); err == nil {
+			model, _ := anyBody["model"].(string)
+			stream, _ := anyBody["stream"].(bool)
+			return strings.TrimSpace(model), stream
+		}
 	case "/v1/chat/completions":
 		var req ChatCompletionsRequest
 		if err := json.Unmarshal(body, &req); err == nil {
@@ -2109,6 +2377,11 @@ func detectTrafficModelAndStream(path string, body []byte) (string, bool) {
 		}
 	case "/v1/responses":
 		var req ResponsesRequest
+		if err := json.Unmarshal(body, &req); err == nil {
+			return strings.TrimSpace(req.Model), req.Stream
+		}
+	case "/v1/code-review":
+		var req CodeReviewRequest
 		if err := json.Unmarshal(body, &req); err == nil {
 			return strings.TrimSpace(req.Model), req.Stream
 		}
@@ -2220,8 +2493,48 @@ func (s *Server) handleWebBrowserCallback(w http.ResponseWriter, r *http.Request
 		_, _ = w.Write([]byte("authentication failed: " + err.Error()))
 		return
 	}
+	s.svc.CancelBrowserLoginWeb(loginID)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = w.Write([]byte("<!doctype html><html><body style='font-family: sans-serif;background:#0f172a;color:#f8fafc;padding:20px'>Login success. You can close this tab and return to codexsess.</body></html>"))
+}
+
+func (s *Server) handleWebBrowserComplete(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		respondErr(w, 405, "method_not_allowed", "method not allowed")
+		return
+	}
+	var req struct {
+		LoginID     string `json:"login_id"`
+		CallbackURL string `json:"callback_url"`
+		Alias       string `json:"alias"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondErr(w, 400, "bad_request", "invalid JSON")
+		return
+	}
+	loginID := strings.TrimSpace(req.LoginID)
+	callbackURL := strings.TrimSpace(req.CallbackURL)
+	if loginID == "" {
+		respondErr(w, 400, "bad_request", "login_id required")
+		return
+	}
+	if callbackURL == "" {
+		respondErr(w, 400, "bad_request", "callback_url required")
+		return
+	}
+	acc, err := s.svc.CompleteFromManualCallback(r.Context(), loginID, callbackURL, strings.TrimSpace(req.Alias))
+	if err != nil {
+		respondErr(w, 400, "bad_request", err.Error())
+		return
+	}
+	s.svc.CancelBrowserLoginWeb(loginID)
+	respondJSON(w, 200, map[string]any{
+		"ok": true,
+		"account": map[string]any{
+			"id":    acc.ID,
+			"email": acc.Email,
+		},
+	})
 }
 
 func (s *Server) handleWebDeviceStart(w http.ResponseWriter, r *http.Request) {
@@ -2277,27 +2590,24 @@ func randomProxyKey() (string, error) {
 
 func oauthBaseURLFromRequest(r *http.Request) string {
 	scheme := "http"
+	if raw := strings.TrimSpace(r.Header.Get("X-Forwarded-Proto")); raw != "" {
+		parts := strings.Split(raw, ",")
+		if p := strings.ToLower(strings.TrimSpace(parts[0])); p == "http" || p == "https" {
+			scheme = p
+		}
+	}
 	if r.TLS != nil {
 		scheme = "https"
 	}
-	host := strings.TrimSpace(r.Host)
+	host := strings.TrimSpace(r.Header.Get("X-Forwarded-Host"))
+	if host == "" {
+		host = strings.TrimSpace(r.Host)
+	}
 	if host == "" {
 		return scheme + "://localhost:3061"
 	}
-	port := ""
-	if _, p, err := net.SplitHostPort(host); err == nil {
-		port = p
-	} else if i := strings.LastIndex(host, ":"); i > -1 {
-		port = host[i+1:]
-	}
-	if strings.TrimSpace(port) == "" {
-		if scheme == "https" {
-			port = "443"
-		} else {
-			port = "80"
-		}
-	}
-	return scheme + "://localhost:" + port
+	parts := strings.Split(host, ",")
+	return scheme + "://" + strings.TrimSpace(parts[0])
 }
 
 func externalBaseURLFromRequest(r *http.Request, bindAddr string) string {

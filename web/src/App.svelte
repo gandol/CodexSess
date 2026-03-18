@@ -12,6 +12,7 @@
   let apiKey = $state('');
   let openAIEndpoint = $state('');
   let claudeEndpoint = $state('');
+  let codeReviewEndpoint = $state('');
   let activeMenu = $state('dashboard');
   let apiLogs = $state([]);
   let showLogDetailModal = $state(false);
@@ -72,6 +73,7 @@
   let browserLoginID = $state('');
   let browserWaiting = $state(false);
   let browserKnownIDs = $state([]);
+  let browserCallbackURL = $state('');
 
   let deviceLogin = $state(null);
   let deviceCodeCopied = $state(false);
@@ -612,6 +614,17 @@
   }'`;
   }
 
+  function codeReviewExample() {
+    return `curl ${codeReviewEndpoint || 'http://127.0.0.1:3061/v1/code-review'} \\\n  -H "Authorization: Bearer ${apiKey || 'sk-...'}" \\\n  -H "Content-Type: application/json" \\\n  -d '{
+    "model": "gpt-5.2-codex",
+    "language": "go",
+    "focus": ["security", "regression"],
+    "diff": "diff --git a/main.go b/main.go\\nindex 111..222 100644\\n--- a/main.go\\n+++ b/main.go\\n@@ -1,3 +1,4 @@\\n+fmt.Println(\\"debug\\")",
+    "custom_prompt": "Prioritize auth and race-condition issues.",
+    "stream": false
+  }'`;
+  }
+
   function prettyJSONText(raw) {
     const text = String(raw ?? '').trim();
     if (!text) return '';
@@ -751,6 +764,7 @@
     apiKey = data.api_key || '';
     openAIEndpoint = data.openai_endpoint || '';
     claudeEndpoint = data.claude_endpoint || '';
+    codeReviewEndpoint = data.code_review_endpoint || '';
     const fromAPI = Array.isArray(data.available_models) ? data.available_models : [];
     availableModels = fromAPI.length > 0 ? fromAPI : defaultCodexModels;
     modelMappings = (data.model_mappings && typeof data.model_mappings === 'object') ? data.model_mappings : {};
@@ -1372,6 +1386,7 @@
     browserWaiting = false;
     browserLoginURL = '';
     browserLoginID = '';
+    browserCallbackURL = '';
     deviceLogin = null;
     deviceCodeCopied = false;
     clearPollTimer();
@@ -1393,6 +1408,7 @@
       addAccountMode = 'browser';
       browserLoginURL = authURL;
       browserLoginID = loginID;
+      browserCallbackURL = '';
       browserWaiting = false;
       browserKnownIDs = accounts.map((a) => a.id);
       setStatus('Browser login URL ready. Click Open New Tab.', 'success');
@@ -1439,6 +1455,39 @@
     browserWaiting = true;
     setStatus('Waiting callback from browser login...', 'info');
     scheduleBrowserWait();
+  }
+
+  async function submitManualBrowserCallback() {
+    const callbackURL = String(browserCallbackURL || '').trim();
+    const loginID = String(browserLoginID || '').trim();
+    if (!loginID) {
+      setStatus('Browser login session not ready.', 'error');
+      return;
+    }
+    if (!callbackURL) {
+      setStatus('Callback URL is required.', 'error');
+      return;
+    }
+    busy = true;
+    try {
+      const data = await req('/api/auth/browser/complete', {
+        method: 'POST',
+        body: JSON.stringify({ login_id: loginID, callback_url: callbackURL })
+      });
+      const accountID = String(data?.account?.id || '').trim();
+      closeAddAccountModal();
+      setStatus('Browser callback login success. Account added.', 'success');
+      if (accountID) {
+        const usageRefresh = await refreshUsageForSelectors([accountID]);
+        if (usageRefresh.refreshed > 0) {
+          setStatus(`Browser callback login success. Usage refreshed for ${usageRefresh.refreshed}/${usageRefresh.total} account(s).`, 'success');
+        }
+      }
+    } catch (error) {
+      setStatus(error.message, 'error');
+    } finally {
+      busy = false;
+    }
   }
 
   async function startDeviceLogin() {
@@ -1773,6 +1822,7 @@
         {apiKey}
         {openAIEndpoint}
         {claudeEndpoint}
+        {codeReviewEndpoint}
         {availableModels}
         {modelMappings}
         {mappingAlias}
@@ -1812,6 +1862,7 @@
         onRegenerateAPIKey={regenerateAPIKey}
         {openAIExample}
         {claudeExample}
+        {codeReviewExample}
       />
     {/if}
 
@@ -1892,9 +1943,28 @@
               >
                 {#if isCopied('browser_login_url')}Copied{:else}Copy{/if}
               </button>
+              <button class="btn btn-primary" onclick={openBrowserLoginTab} disabled={busy || !browserLoginURL}>
+                Open New Tab
+              </button>
+            </div>
+            <label for="browserCallbackUrl">Callback URL (Manual Paste)</label>
+            <div class="device-code-row">
+              <input
+                id="browserCallbackUrl"
+                value={browserCallbackURL}
+                placeholder="http://127.0.0.1:3061/auth/callback?code=...&state=..."
+                oninput={(event) => (browserCallbackURL = event.currentTarget.value)}
+                disabled={busy}
+              />
+              <button
+                class="btn btn-secondary"
+                onclick={submitManualBrowserCallback}
+                disabled={busy || !browserCallbackURL.trim()}
+              >
+                Submit
+              </button>
             </div>
             <div class="panel-actions">
-              <button class="btn btn-primary" onclick={openBrowserLoginTab} disabled={busy}>Open New Tab</button>
               <button class="btn btn-secondary" onclick={() => (addAccountMode = 'menu')} disabled={busy}>Back</button>
             </div>
             {#if browserWaiting}

@@ -74,6 +74,18 @@ func TestHandleClaudeMessages_Unauthorized(t *testing.T) {
 	}
 }
 
+func TestHandleCodeReview_Unauthorized(t *testing.T) {
+	s := &Server{apiKey: "sk-test"}
+	req := httptest.NewRequest(http.MethodPost, "/v1/code-review", strings.NewReader(`{"diff":"diff --git a/a b/a"}`))
+	rec := httptest.NewRecorder()
+
+	s.handleCodeReview(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", rec.Code)
+	}
+}
+
 func TestHandleWebSettings_ClaudeEndpointUsesV1Messages(t *testing.T) {
 	s := &Server{
 		apiKey:   "sk-test",
@@ -241,6 +253,44 @@ func TestDetectTrafficModelAndStream_SupportsNewClaudePath(t *testing.T) {
 	}
 }
 
+func TestDetectTrafficModelAndStream_SupportsCodeReviewPath(t *testing.T) {
+	model, stream := detectTrafficModelAndStream("/v1/code-review", []byte(`{"model":"gpt-5.2-codex","diff":"x","stream":true}`))
+	if model != "gpt-5.2-codex" {
+		t.Fatalf("expected model gpt-5.2-codex, got %q", model)
+	}
+	if !stream {
+		t.Fatalf("expected stream=true")
+	}
+}
+
+func TestBuildCodeReviewPrompt_CustomPromptOptional(t *testing.T) {
+	prompt, err := buildCodeReviewPrompt(CodeReviewRequest{
+		Model:    "gpt-5.2-codex",
+		Diff:     "diff --git a/a b/a",
+		Language: "go",
+	})
+	if err != nil {
+		t.Fatalf("build prompt error: %v", err)
+	}
+	if !strings.Contains(prompt, "DIFF INPUT") {
+		t.Fatalf("expected diff section in prompt")
+	}
+	if strings.Contains(prompt, "Additional Reviewer Instruction") {
+		t.Fatalf("did not expect additional instruction section when custom_prompt is empty")
+	}
+}
+
+func TestBuildCodeReviewPrompt_RejectsOversizedInput(t *testing.T) {
+	tooLarge := strings.Repeat("a", maxCodeReviewInputChars+1)
+	_, err := buildCodeReviewPrompt(CodeReviewRequest{
+		Model: "gpt-5.2-codex",
+		Diff:  tooLarge,
+	})
+	if err == nil {
+		t.Fatalf("expected oversized diff to fail")
+	}
+}
+
 func TestParseToolCallsFromText_WrappedJSON(t *testing.T) {
 	defs := []ChatToolDef{
 		{Type: "function", Function: ChatToolFunctionDef{Name: "navigate_page"}},
@@ -276,5 +326,27 @@ func TestParseToolCallsFromText_RejectsUnknownTool(t *testing.T) {
 	}
 	if len(calls) != 0 {
 		t.Fatalf("expected no calls")
+	}
+}
+
+func TestOAuthBaseURLFromRequest_UsesRequestHost(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "http://example.com/api/auth/browser/start", nil)
+	req.Host = "app.example.com:8443"
+
+	base := oauthBaseURLFromRequest(req)
+	if base != "http://app.example.com:8443" {
+		t.Fatalf("expected base url from request host, got %q", base)
+	}
+}
+
+func TestOAuthBaseURLFromRequest_UsesForwardedHeaders(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:3061/api/auth/browser/start", nil)
+	req.Host = "127.0.0.1:3061"
+	req.Header.Set("X-Forwarded-Proto", "https")
+	req.Header.Set("X-Forwarded-Host", "codexsess.example.com")
+
+	base := oauthBaseURLFromRequest(req)
+	if base != "https://codexsess.example.com" {
+		t.Fatalf("expected forwarded base url, got %q", base)
 	}
 }
