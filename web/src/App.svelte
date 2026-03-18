@@ -1772,12 +1772,6 @@
         </span>
         <span>Dashboard</span>
       </button>
-      <button class={activeMenu === 'settings' ? 'is-active' : ''} onclick={() => switchMenu('settings')}>
-        <span class="nav-icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24"><path d="M19.14 12.94a7.96 7.96 0 000-1.88l2.03-1.58-1.92-3.32-2.39.96a8.1 8.1 0 00-1.62-.94L14.9 3h-3.8l-.34 2.18c-.56.22-1.1.52-1.6.9l-2.42-.98-1.9 3.32 2.02 1.6a8.2 8.2 0 000 1.86l-2.03 1.58 1.92 3.34 2.41-.98c.5.38 1.03.7 1.6.92L11.1 21h3.8l.34-2.2c.58-.22 1.12-.52 1.62-.9l2.4.96 1.9-3.32-2.02-1.6zM13 15a3 3 0 110-6 3 3 0 010 6z"></path></svg>
-        </span>
-        <span>Settings</span>
-      </button>
       <button class={activeMenu === 'api-endpoints' ? 'is-active' : ''} onclick={() => switchMenu('api-endpoints')}>
         <span class="nav-icon" aria-hidden="true">
           <svg viewBox="0 0 24 24"><path d="M3 5h18v4H3V5zm0 5.5h18v4H3v-4zM3 16h18v3H3v-3z"></path></svg>
@@ -1789,6 +1783,12 @@
           <svg viewBox="0 0 24 24"><path d="M4 4h16v4H4V4zm0 6h16v10H4V10zm3 3v4h2v-4H7zm4 0v4h2v-4h-2zm4 0v4h2v-4h-2z"></path></svg>
         </span>
         <span>API Logs</span>
+      </button>
+      <button class={activeMenu === 'settings' ? 'is-active' : ''} onclick={() => switchMenu('settings')}>
+        <span class="nav-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M19.14 12.94a7.96 7.96 0 000-1.88l2.03-1.58-1.92-3.32-2.39.96a8.1 8.1 0 00-1.62-.94L14.9 3h-3.8l-.34 2.18c-.56.22-1.1.52-1.6.9l-2.42-.98-1.9 3.32 2.02 1.6a8.2 8.2 0 000 1.86l-2.03 1.58 1.92 3.34 2.41-.98c.5.38 1.03.7 1.6.92L11.1 21h3.8l.34-2.2c.58-.22 1.12-.52 1.62-.9l2.4.96 1.9-3.32-2.02-1.6zM13 15a3 3 0 110-6 3 3 0 010 6z"></path></svg>
+        </span>
+        <span>Settings</span>
       </button>
       <button class={activeMenu === 'about' ? 'is-active' : ''} onclick={() => switchMenu('about')}>
         <span class="nav-icon" aria-hidden="true">
