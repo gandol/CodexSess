@@ -7,18 +7,17 @@ The format follows Keep a Changelog and uses semantic version tags (`vMAJOR.MINO
 ## [1.0.2] - 2026-03-18
 
 ### Added
-- Dedicated GitHub workflow for PR code review using `POST /v1/code-review` with chunked diff processing and synthesized final review output.
+- Dedicated GitHub workflow for PR code review with synthesized final review output.
 - Optional PR autofix helper workflow that generates patch suggestions and uploads patch artifacts for manual application.
 - New API-key protected endpoint `GET /v1/auth.json` to export the active API account auth payload for external Codex CLI runners.
 
 ### Changed
-- Removed the dedicated `/v1/code-review` API surface from backend routing and request dispatch.
 - OpenAI `/v1` root payload validation now only dispatches to chat completions and responses APIs.
-- API settings payload now exposes `auth_json_endpoint` (replacing `code_review_endpoint`) for automation clients.
-- API Workspace UI now shows Auth JSON endpoint and download example instead of code-review endpoint examples.
+- API settings payload now exposes `auth_json_endpoint` for automation clients.
+- API Workspace UI now shows Auth JSON endpoint and download example for automation use.
 - Code-review automation flow is now review-first and can be configured to avoid direct push/merge behavior.
-- API/code-review integration and logging coverage were refined so review calls are visible and traceable in API logs.
-- Settings and documentation were expanded with code-review endpoint usage details and cURL examples.
+- API logging and automation coverage were refined so review flows stay visible and traceable in API logs.
+- Settings and documentation were expanded with automation usage details and cURL examples.
 - GitHub Actions code-review and autofix automation are now consolidated into a single workflow file for simpler maintenance.
 - GitHub code-review workflow now supports manual run from Actions (`workflow_dispatch`) with optional base/head SHA and PR comment target.
 - Release and code-review workflows now use Node 24-ready artifact action (`actions/upload-artifact@v7`), and release publishing was migrated from `softprops/action-gh-release` to `gh release` CLI.
@@ -30,7 +29,7 @@ The format follows Keep a Changelog and uses semantic version tags (`vMAJOR.MINO
 - README now documents `CODEXSESS_BIND_ADDR` and includes GUI-mode `~/.bashrc` bind override example for `0.0.0.0`.
 - Startup logging now prints actual bind address separately from local browser URL so public bind mode is explicit in runtime logs.
 - Startup logging now adds explicit `public bind enabled` line when bind host is `0.0.0.0` or `::`.
-- API request routing now applies backend auto-switch consistently across `/v1/chat/completions`, `/v1/responses`, `/v1/messages`, and `/v1/code-review`: if active account quota is exhausted, it switches to the best available account; if all are exhausted, it returns quota exhaustion.
+- API request routing now applies backend auto-switch consistently across chat/responses/messages routes: if active account quota is exhausted, it switches to the best available account; if all are exhausted, it returns quota exhaustion.
 - First-account bootstrap now auto-selects the very first added account as both API active and CLI (Codex) active when account storage is empty.
 - Copy actions now include a non-secure-context fallback (`execCommand`) so copy buttons keep working when accessing CodexSess via IP over HTTP.
 - Installer now enforces Codex CLI availability: it auto-installs `npm` when missing and then installs `@openai/codex` globally when `codex` is not found.
@@ -54,7 +53,6 @@ The format follows Keep a Changelog and uses semantic version tags (`vMAJOR.MINO
 - API traffic logging now includes resolved account detail fields.
 - Version/update API surface for frontend (`/api/version/check` and version fields in settings response).
 - Browser login now supports manual callback URL submission (`/api/auth/browser/complete`) for VPS/remote login flows.
-- New API endpoint `POST /v1/code-review` with optional `custom_prompt` for dedicated code-review workflows.
 
 ### Changed
 - Sidebar now shows current app version above logout.
@@ -68,5 +66,4 @@ The format follows Keep a Changelog and uses semantic version tags (`vMAJOR.MINO
 - Browser login modal now includes manual callback URL input with inline submit action.
 - OAuth callback base URL resolution now respects request/forwarded host instead of forcing localhost.
 - OpenAI streaming final chunk now sends assistant role in `delta` for stricter client compatibility.
-- Code review endpoint now enforces input size limits and quota checks for consistency with other proxy endpoints.
 - GitHub code-review workflow now uses `jq --rawfile` for large diffs and adds retry/timeout hardening for CodexSess API calls.
