@@ -4,6 +4,17 @@ All notable changes to this project are documented in this file.
 
 The format follows Keep a Changelog and uses semantic version tags (`vMAJOR.MINOR.PATCH`).
 
+## [Unreleased]
+
+### Added
+- Docker support with multi-stage build configuration for containerized deployment.
+- Docker Compose configuration for easy container orchestration with persistent data volumes.
+- Codex CLI installation in Docker image for full functionality.
+- `.dockerignore` file to optimize Docker build context and reduce image size.
+- Health check endpoint configuration in docker-compose for container monitoring.
+- Environment variable support for admin credentials (`ADMIN_USERNAME` and `ADMIN_PASSWORD`).
+- `.env.example` file with sample environment variable configuration for Docker deployments.
+
 ## [1.0.2] - 2026-03-18
 
 ### Web Coding (`/chat`)

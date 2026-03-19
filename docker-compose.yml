@@ -1,0 +1,32 @@
+services:
+  codexsess:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        APP_VERSION: ${APP_VERSION:-docker}
+    image: codexsess:latest
+    container_name: codexsess
+    ports:
+      - "${PORT:-3061}:3061"
+    volumes:
+      # Persist application data
+      - codexsess-data:/app/data
+    environment:
+      - PORT=3061
+      # Prevent browser auto-open in container
+      - CODEXSESS_NO_OPEN_BROWSER=1
+      # Admin credentials (override with .env file or export these variables)
+      - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-hijilabs}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3061/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+volumes:
+  codexsess-data:
+    driver: local

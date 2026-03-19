@@ -119,6 +119,15 @@ func LoadOrInit() (Config, error) {
 	if strings.TrimSpace(cfg.AdminPasswordHash) == "" {
 		cfg.AdminPasswordHash = def.AdminPasswordHash
 	}
+
+	// Override with environment variables if set
+	if envUser := strings.TrimSpace(os.Getenv("ADMIN_USERNAME")); envUser != "" {
+		cfg.AdminUsername = envUser
+	}
+	if envPass := strings.TrimSpace(os.Getenv("ADMIN_PASSWORD")); envPass != "" {
+		cfg.AdminPasswordHash = HashPassword(envPass)
+	}
+
 	cfg.BindAddr = resolveBindAddr()
 	return cfg, nil
 }

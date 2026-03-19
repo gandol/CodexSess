@@ -1,0 +1,42 @@
+# Git
+.git
+.gitignore
+.github
+
+# Build artifacts
+codexsess
+codexsess.exe
+*.syso
+build/
+
+# Development
+.air.toml
+*.log
+
+# Node
+web/node_modules
+web/dist
+
+# Go
+*.test
+*.out
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# Documentation (not needed in container)
+README.md
+README.id.md
+CHANGELOG.md
+AGENTS.md
+Uncodixfy.md
+screenshots/
+
+# Packaging
+packaging/
+
+# Scripts (not needed in runtime)
+scripts/
